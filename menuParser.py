@@ -353,37 +353,49 @@ if __name__ == '__main__':
        Run through the list of rows to be processed and select out only the needed attachments?
     '''
     '''run through all sheet attacments'''
-    for attachment in attachments:
-        '''was the row flaged for processing?'''
-        if (attachment['parentType'] == 'ROW' and attachment['parentId'] in rows):
-            count += 1 #debug
-            if smartsheetDown == True:
-                '''get attachment url and download the pdf'''
-                attachmentObj = getAttachment(sheetID,attachment['id'])
-                fh = urllib2.urlopen(attachmentObj['url'])
-                localfile = open('tmp.pdf','w')
-                localfile.write(fh.read())
-                localfile.close()
-            '''process the PDF and get the meals back'''
-            meals = getMeals('tmp.pdf')
-            if debug == 'approve':
-                print attachment['name']
-                for meal in meals:
-                    print "New Meal"
-                    for part in meal:
-                        print part + ': ' + meal[part]
-                        raw_input("Press Enter For Next")
-            '''get the dictionary ready for smartsheet'''
-            ssdata = prepData(meals, attachment['parentId'],columnId)
-            '''prepare to uncheck the box so it doesn't get reprocessed'''
-            checkData = {"cells":[{"columnId":columnId['process'], "value":False}]}
-            if smartsheetUp == True:
-                '''upload the data'''
-                result = insertRows(sheetID,ssdata)
-                '''if the save succeded uncheck the processing box'''
-                if result['resultCode'] == 0:
-                    updateRow(sheetID,attachment['parentId'],checkData)
-            '''Stop after only some menus?'''
-            if countLimit == True:
-                if count > 0:
-                    exit()
+    attachments = sorted(attachments,key=itemgetter('parentId'))
+    rows = sorted(rows)
+    a = 0
+    count = 0
+    for row in rows:
+        found = False
+        if a < len(attachments):
+            while attachments[a]['parentId'] <= row:
+                if attachments[a]['parentId'] == row and attachments[a]['parentType'] == 'ROW':
+                    found = True
+                    count += 1 #debug
+                    if smartsheetDown == True:
+                        '''get attachment url and download the pdf'''
+                        attachmentObj = getAttachment(sheetID,attachments[a]['id'])
+                        fh = urllib2.urlopen(attachmentObj['url'])
+                        localfile = open('tmp.pdf','w')
+                        localfile.write(fh.read())
+                        localfile.close()
+                    '''process the PDF and get the meals back'''
+                    meals = getMeals('tmp.pdf')
+                    if debug == 'approve':
+                        print attachment['name']
+                        for meal in meals:
+                            print "New Meal"
+                            for part in meal:
+                                print part + ': ' + meal[part]
+                                raw_input("Press Enter For Next")
+                    '''get the dictionary ready for smartsheet'''
+                    ssdata = prepData(meals, attachments[a]['parentId'],columnId)
+                    '''prepare to uncheck the box so it doesn't get reprocessed'''
+                    checkData = {"cells":[{"columnId":columnId['process'], "value":False}]}
+                    if smartsheetUp == True:
+                        '''upload the data'''
+                        result = insertRows(sheetID,ssdata)
+                        '''if the save succeded uncheck the processing box'''
+                        if result['resultCode'] == 0:
+                            updateRow(sheetID,attachments[a]['parentId'],checkData)
+                    '''Stop after only some menus?'''
+                    if countLimit == True:
+                        if count > 0:
+                            exit()
+                a += 1
+                if a>= len(attachments):
+                    break
+        if found == False:
+            print "ERROR"
