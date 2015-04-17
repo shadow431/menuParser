@@ -1,5 +1,6 @@
 <h3>Install</h3>
-  virtualenv \<envi\><br />
+  virtualenv \<env\><br />
+  source ./\<env\>/bin/activate<br />
   pip install -r requirements.txt
 
 <h3>menuPaser.conf options</h3>
