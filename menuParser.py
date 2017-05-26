@@ -357,8 +357,12 @@ if __name__ == '__main__':
     '''see if the row needs to be processed'''
     for each in sheet['rows']:
         for cell in each['cells']:
-            if (cell['columnId'] == columnId['process'] and cell['value']  == True):
-                rows.append(each['id'])
+            if (cell['columnId'] == columnId['process']):
+                try:
+                    if (cell['value'] == True):
+                        rows.append(each['id'])
+                except KeyError:
+                    continue
     if debug == 'smartsheet':
         print rows
         raw_input("Press Enter to continue...")
