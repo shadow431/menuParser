@@ -28,3 +28,14 @@
   
   **smartsheetUP**
       Boolean used to set whether or not to upload the data once processed back up to smartsheet
+
+<h2>Optimization test</h2>
+Original
+Fri Apr 17 08:31:31 PDT 2015
+Fri Apr 17 08:34:42 PDT 2015
+
+
+Test 1 - New Attacment processing
+Fri Apr 17 08:35:51 PDT 2015
+Fri Apr 17 08:39:10 PDT 2015
+
