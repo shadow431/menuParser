@@ -113,6 +113,11 @@ def getDishes(food,height):
 
     if debug == 'pdf': raw_input('Press Enter to Continue')
 
+    '''if main dish isnt set set it to be empyt to prevent futre error (Not a very common issue and can be resolved by hand.  later TODO'''
+    try:
+        mainDish
+    except NameError:
+        mainDish = ''
     '''if side dish isnt set set it to be empyt to prevent futre error (there isn't always a side dish'''
     try:
         sideDish
