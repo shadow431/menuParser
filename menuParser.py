@@ -180,7 +180,19 @@ def getTimes(prep,cook,total,height):
             thisTotal = each['text']
 
     '''Does thisCook contain to times? if so fix it'''
-    if 'Cook\n' in thisCook and 'Total\n' in thisCook:
+    try:
+        thisCook
+    except NameError:
+        if ('Cook\n' in thisTotal and 'Total\n' in thisTotal):
+            thisCook,thisTotal=splitTimes(thisTotal)
+    else:
+        if ('Cook\n' in thisCook and 'Total\n' in thisCook):
+            thisCook,thisTotal=splitTimes(thisCook)
+
+    '''Return the times, but only the hours and minutes, we no longer need the words'''
+    return thisPrep.split('\n')[1],thisCook.split('\n')[1],thisTotal.split('\n')[1]
+
+def splitTimes(thisCook):
         pieces = thisCook.split('\n')
         timeParts = pieces[2].split(' ')
         timea= ''
@@ -193,9 +205,7 @@ def getTimes(prep,cook,total,height):
                 timeb = timeb + part + ' '
         thisCook = 'Cook\n'+timea+'\n'
         thisTotal = 'Total\n'+timeb+'\n'
-
-    '''Return the times, but only the hours and minutes, we no longer need the words'''
-    return thisPrep.split('\n')[1],thisCook.split('\n')[1],thisTotal.split('\n')[1]
+        return thisCook,thisTotal
 
 '''this function takes the data pull out of the pdf and assembles the meals togeather for a page'''
 def mealAssembly(data):
