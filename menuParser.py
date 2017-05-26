@@ -15,32 +15,32 @@ get the smartsheet data
 TODO: replace with sdk
 '''
 def getSheet(sheetID):
-    url = 'https://api.smartsheet.com/1.1/sheet/'+str(sheetID)
+    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetID)
     r = requests.get(url, headers=headers)
     rArr = r.json()
     return rArr
 
 def getAttachments(sheetID):
-    url = 'https://api.smartsheet.com/1.1/sheet/'+str(sheetID)+'/attachments'
+    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetID)+'/attachments?includeAll=True'
     r = requests.get(url, headers=headers)
     rArr = r.json()
     return rArr
 
 def getAttachment(sheetID,attachmentID):
-    url = 'https://api.smartsheet.com/1.1/sheet/'+str(sheetID)+'/attachment/'+str(attachmentID)
+    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetID)+'/attachments/'+str(attachmentID)
     r = requests.get(url, headers=headers)
     rArr = r.json()
     return rArr
 
 def insertRows(sheetId,data):
     jsonData = json.dumps(data)
-    url = 'https://api.smartsheet.com/1.1/sheet/'+str(sheetId)+'/rows'
+    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetId)+'/rows'
     r = requests.post(url, data=jsonData, headers=headers)
     return r.json()
 
 def updateRow(sheetId,rowId,data):
     data = json.dumps(data)
-    url = 'https://api.smartsheet.com/1.1/sheet/'+str(sheetId)+'/row/'+str(rowId)
+    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetId)+'/rows'
     r = requests.put(url, data=data, headers=headers)
     return r
 
@@ -309,18 +309,17 @@ Here the columnId and meal dictionary keys need to match
 this stiches everything together to build the smartsheet rows with parentId
 '''
 def prepData(meals, rowID, columnIds):
-    ssdata = {}
-    ssdata['parentId'] = rowID
-    ssdata['rows'] = []
+    ssdata = []
     for meal in meals:
         row = {}
+	row['parentId'] = rowID
         row['cells'] = []
         for item in meal:
             columns ={}
             columns['columnId'] = columnIds[item]
             columns['value'] = meal[item]
             row['cells'].append(columns)
-        ssdata['rows'].append(row)
+        ssdata.append(row)
 
     return ssdata
 
@@ -368,7 +367,7 @@ if __name__ == '__main__':
        Run through the list of rows to be processed and select out only the needed attachments?
     '''
     '''run through all sheet attacments'''
-    attachments = sorted(attachments,key=itemgetter('parentId'))
+    attachments = sorted(attachments['data'],key=itemgetter('parentId'))
     rows = sorted(rows)
     a = 0
     count = 0
@@ -403,7 +402,7 @@ if __name__ == '__main__':
                     '''get the dictionary ready for smartsheet'''
                     ssdata = prepData(meals, attachments[a]['parentId'],columnId)
                     '''prepare to uncheck the box so it doesn't get reprocessed'''
-                    checkData = {"cells":[{"columnId":columnId['process'], "value":False}]}
+                    checkData = {"id":attachments[a]['parentId'],"cells":[{"columnId":columnId['process'], "value":False}]}
                     if smartsheetUp == True:
                         '''upload the data'''
                         result = insertRows(sheetID,ssdata)
