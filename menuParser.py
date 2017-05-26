@@ -247,7 +247,7 @@ def getMeals(pdf):
     '''process each page'''
     for pageNumber,page in pages:
         '''is it the last page? if so bail, its the shopping list'''
-        if pageCount == totalPages:
+        if pageCount == totalPages or len(meals) == 7:
             break
 
         data = {}
