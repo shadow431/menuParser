@@ -7,7 +7,7 @@ from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfparser import PDFParser
 import pdfminer
 from operator import itemgetter
-import re, json, requests, urllib2
+import re, json, requests, urllib2,traceback
 
 
 '''
@@ -387,7 +387,12 @@ if __name__ == '__main__':
                         localfile.write(fh.read())
                         localfile.close()
                     '''process the PDF and get the meals back'''
-                    meals = getMeals('tmp.pdf')
+                    try:
+                        meals = getMeals('tmp.pdf')
+                    except:
+                        print "Failed: "+ str(row)
+                        print traceback.print_exc()
+                        break
                     if debug == 'approve':
                         print attachment['name']
                         for meal in meals:
