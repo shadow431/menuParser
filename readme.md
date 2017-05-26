@@ -19,6 +19,7 @@
         pdf: prints out the data as it is pulled and manaipulated,
         smartsheet: prints the data as it is retrieved, prepared, and submited for/to smartsheet,
         approve: itterates through each component of the menus so you can see if it is parsing right.
+        requests: prints out the response from smartsheet for row inserts
   
   **smartsheetDown**
       Boolean used to set whether to pull data from smartsheet for processing

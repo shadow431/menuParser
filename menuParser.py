@@ -411,6 +411,8 @@ if __name__ == '__main__':
                         '''upload the data'''
                         result = insertRows(sheetID,ssdata)
                         '''if the save succeded uncheck the processing box'''
+                        if debug == 'requests':
+                            print result
                         if result['resultCode'] == 0:
                             updateRow(sheetID,attachments[a]['parentId'],checkData)
                     '''Stop after only some menus?'''
