@@ -396,7 +396,7 @@ if __name__ == '__main__':
                 if attachments[a]['parentId'] == row and attachments[a]['parentType'] == 'ROW':
                     found = True
                     count += 1 #debug
-                    if smartsheetDown == True:
+                    if smartsheetDown == 'True':
                         '''get attachment url and download the pdf'''
                         attachmentObj = getAttachment(sheetID,attachments[a]['id'])
                         fh = urllib.request.urlopen(attachmentObj['url'])
@@ -421,7 +421,7 @@ if __name__ == '__main__':
                     ssdata = prepData(meals, attachments[a]['parentId'],columnId)
                     '''prepare to uncheck the box so it doesn't get reprocessed'''
                     checkData = {"id":attachments[a]['parentId'],"cells":[{"columnId":columnId['process'], "value":False}]}
-                    if smartsheetUp == True:
+                    if smartsheetUp == 'True':
                         '''upload the data'''
                         result = insertRows(sheetID,ssdata)
                         '''if the save succeded uncheck the processing box'''
@@ -430,7 +430,7 @@ if __name__ == '__main__':
                         if result['resultCode'] == 0:
                             updateRow(sheetID,attachments[a]['parentId'],checkData)
                     '''Stop after only some menus?'''
-                    if countLimit == True:
+                    if countLimit == 'True':
                         if count > 0:
                             exit()
                 a += 1
