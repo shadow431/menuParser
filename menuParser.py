@@ -400,7 +400,7 @@ if __name__ == '__main__':
                         '''get attachment url and download the pdf'''
                         attachmentObj = getAttachment(sheetID,attachments[a]['id'])
                         fh = urllib.request.urlopen(attachmentObj['url'])
-                        localfile = open('tmp.pdf','w')
+                        localfile = open('tmp.pdf','wb')
                         localfile.write(fh.read())
                         localfile.close()
                     '''process the PDF and get the meals back'''
