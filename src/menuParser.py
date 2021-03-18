@@ -347,7 +347,7 @@ if __name__ == '__main__':
       print("Please Provide a Sheet ID")
       bail=True
 
-    if not ssToken == '':
+    if not ssToken:
       print("Please Provide a Smartsheet API token")
       bail=True
 
