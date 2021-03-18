@@ -1,3 +1,4 @@
 *.pdf
 *.conf
+.env
 venv/
