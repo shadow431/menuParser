@@ -15,32 +15,32 @@ get the smartsheet data
 TODO: replace with sdk
 '''
 def getSheet(sheetID):
-    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetID)
+    url = 'https://%s/2.0/sheets/%s'%(server,sheetID)
     r = requests.get(url, headers=headers)
     rArr = r.json()
     return rArr
 
 def getAttachments(sheetID):
-    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetID)+'/attachments?includeAll=True'
+    url = 'https://%s/2.0/sheets/%s/attachments?includeAll=True'%(server,sheetID)
     r = requests.get(url, headers=headers)
     rArr = r.json()
     return rArr
 
 def getAttachment(sheetID,attachmentID):
-    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetID)+'/attachments/'+str(attachmentID)
+    url = 'https://%s/2.0/sheets/%s/attachments/%s'%(server,sheetID,attachmentID)
     r = requests.get(url, headers=headers)
     rArr = r.json()
     return rArr
 
 def insertRows(sheetId,data):
     jsonData = json.dumps(data)
-    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetId)+'/rows'
+    url = 'https://%s/2.0/sheets/%s/rows'%(server,sheetID)
     r = requests.post(url, data=jsonData, headers=headers)
     return r.json()
 
 def updateRow(sheetId,rowId,data):
     data = json.dumps(data)
-    url = 'https://api.smartsheet.com/2.0/sheets/'+str(sheetId)+'/rows'
+    url = 'https://%s/2.0/sheets/%s/rows'%(server,sheetID)
     r = requests.put(url, data=data, headers=headers)
     return r
 
