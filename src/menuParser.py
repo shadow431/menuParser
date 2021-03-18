@@ -8,7 +8,7 @@ from pdfminer.pdfparser import PDFParser
 import pdfminer
 from operator import itemgetter
 from dotenv import load_dotenv
-import re, json, requests, urllib.request, urllib.error, urllib.parse,traceback, os
+import re, json, requests, urllib.request, urllib.error, urllib.parse,traceback, os, sys
 
 '''
 get the smartsheet data
@@ -331,16 +331,28 @@ def prepData(meals, rowID, columnIds):
 Main loop
 '''
 if __name__ == '__main__':
+    bail = False
+
     load_dotenv()
 
-    sheetID = os.getenv("sheetID")
-    ssToken = os.getenv("ssToken")
+    sheetID = os.getenv("sheetID") #Req
+    ssToken = os.getenv("ssToken") #Req
     server  = os.getenv("server")
     countLimit = os.getenv("countLimit")
     debug = os.getenv("debug")
     smartsheetDown = os.getenv("smartsheetDown") 
     smartsheetUp = os.getenv("smartsheetUp")
 
+    if not sheetID:
+      print("Please Provide a Sheet ID")
+      bail=True
+
+    if not ssToken == '':
+      print("Please Provide a Smartsheet API token")
+      bail=True
+
+    if bail:
+      sys.exit("Missing Required Variables")
 
     '''bring in config'''
     #exec(compile(open("menuParser.conf").read(), "menuParser.conf", 'exec'), locals())
