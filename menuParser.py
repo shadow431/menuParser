@@ -77,14 +77,14 @@ def getColumns(sheet):
 Pull out and assemble the names of the dishes as well as the meal Type, if there is a type)
 '''
 def getDishes(food,height):
-    if debug == 'pdf': print height
+    if debug == 'pdf': print(height)
 
     menuLine =[]
     menuType = ''
 
     '''Get the lines pertaining to this meail'''
     for line in food:
-        if debug == 'pdf': print line
+        if debug == 'pdf': print(line)
         if int(line['height']) in range(int(height)-100,int(height)):
             menuLine.append(line)
         elif int(line['height']) in range(int(height),int(height)+3) and line['width'] < 193.0:
@@ -96,7 +96,7 @@ def getDishes(food,height):
     or the first of the side dish name.  if it side dish has been set it is probably the second line of that
     '''
     for num,each in enumerate(menuLine):
-        if debug == 'pdf': print str(num) + ' : ' + str(each)
+        if debug == 'pdf': print((str(num) + ' : ' + str(each)))
         if num == 0:
             mainDish = each['text']
         elif num > 0:
@@ -111,7 +111,7 @@ def getDishes(food,height):
             elif diff > 20:
                 sideDish = each['text']
 
-    if debug == 'pdf': raw_input('Press Enter to Continue')
+    if debug == 'pdf': eval(input('Press Enter to Continue'))
 
     '''if main dish isnt set set it to be empyt to prevent futre error (Not a very common issue and can be resolved by hand.  later TODO'''
     try:
@@ -142,9 +142,9 @@ def getSteps(ingdir,height):
     for item in ingdir:
         if int(item['height']) in range(int(height),int(height)+20) and (item['width'] == 193.0 or item['width'] == 389.0):
            if debug == 'pdf':
-               print height
-               print item
-               raw_input("Press any key to continue")
+               print(height)
+               print(item)
+               eval(input("Press any key to continue"))
            items.append(item)
 
     '''sort them by horizontal alignment'''
@@ -183,6 +183,8 @@ def getTimes(prep,cook,total,height):
     try:
         thisCook
     except NameError:
+        print(thisTotal)
+        print(thisPrep)
         if ('Cook\n' in thisTotal and 'Total\n' in thisTotal):
             thisCook,thisTotal=splitTimes(thisTotal)
     else:
@@ -220,8 +222,8 @@ def mealAssembly(data):
         meal['ingredients'],meal['instructions'] = getSteps(data['food'],mealNum['height'])
         meals.append(meal)
     if debug == 'pdf':
-        print meals
-        raw_input("press enter to continue...")
+        print(meals)
+        eval(input("press enter to continue..."))
     return meals
 
 '''
@@ -292,13 +294,15 @@ def getMeals(pdf):
             #    data['ingdir'].append(item)
             elif 'Meals: Side dishes are in ITALICS\n' in item['text']:
                 continue
+            elif 'Grocery Items to Purchase' in item['text']:
+                break #this is the last page :\
             elif re.search('^Meal \d',item['text']):
                 data['mealNum'].append(item)
             else:
                 data['food'].append(item)
         if debug == 'pdf':
-            print data
-            raw_input('Press any key to continue....')
+            print(data)
+            eval(input('Press any key to continue....'))
         meals = meals + mealAssembly(data)
         pageCount += 1
     return meals
@@ -312,7 +316,7 @@ def prepData(meals, rowID, columnIds):
     ssdata = []
     for meal in meals:
         row = {}
-	row['parentId'] = rowID
+        row['parentId'] = rowID
         row['cells'] = []
         for item in meal:
             columns ={}
@@ -320,7 +324,6 @@ def prepData(meals, rowID, columnIds):
             columns['value'] = meal[item]
             row['cells'].append(columns)
         ssdata.append(row)
-
     return ssdata
 
 
@@ -330,26 +333,26 @@ Main loop
 if __name__ == '__main__':
 
     '''bring in config'''
-    execfile("menuParser.conf", locals())
+    exec(compile(open("menuParser.conf").read(), "menuParser.conf", 'exec'), locals())
     headers = {'Authorization': 'Bearer '+str(ssToken)}
 
     '''get sheet data'''
     sheet = getSheet(sheetID)
     if debug == 'smartsheet':
-        print sheet
-        raw_input("Press Enter to continue...")
+        print(sheet)
+        eval(input("Press Enter to continue..."))
 
     '''build list of columns'''
     columnId = getColumns(sheet)
     if debug == 'smartsheet':
-        print columnId
-        raw_input("Press Enter to continue...")
+        print(columnId)
+        eval(input("Press Enter to continue..."))
 
     '''Get list of attachments'''
     attachments = getAttachments(sheetID)
     if debug == 'smartsheet':
-        print attachments
-        raw_input("Press Enter to continue...")
+        print(attachments)
+        eval(input("Press Enter to continue..."))
 
     rows = []
     count = 0
@@ -364,8 +367,8 @@ if __name__ == '__main__':
                 except KeyError:
                     continue
     if debug == 'smartsheet':
-        print rows
-        raw_input("Press Enter to continue...")
+        print(rows)
+        eval(input("Press Enter to continue..."))
     '''
     Performance Help:
        Run through the list of rows to be processed and select out only the needed attachments?
@@ -385,7 +388,7 @@ if __name__ == '__main__':
                     if smartsheetDown == True:
                         '''get attachment url and download the pdf'''
                         attachmentObj = getAttachment(sheetID,attachments[a]['id'])
-                        fh = urllib2.urlopen(attachmentObj['url'])
+                        fh = urllib.request.urlopen(attachmentObj['url'])
                         localfile = open('tmp.pdf','w')
                         localfile.write(fh.read())
                         localfile.close()
@@ -393,16 +396,16 @@ if __name__ == '__main__':
                     try:
                         meals = getMeals('tmp.pdf')
                     except:
-                        print "Failed: "+ str(row)
-                        print traceback.print_exc()
+                        print(("Failed: "+ str(row)))
+                        print((traceback.print_exc()))
                         break
                     if debug == 'approve':
-                        print attachment['name']
+                        print((attachment['name']))
                         for meal in meals:
-                            print "New Meal"
+                            print("New Meal")
                             for part in meal:
-                                print part + ': ' + meal[part]
-                                raw_input("Press Enter For Next")
+                                print((part + ': ' + meal[part]))
+                                eval(input("Press Enter For Next"))
                     '''get the dictionary ready for smartsheet'''
                     ssdata = prepData(meals, attachments[a]['parentId'],columnId)
                     '''prepare to uncheck the box so it doesn't get reprocessed'''
@@ -412,7 +415,7 @@ if __name__ == '__main__':
                         result = insertRows(sheetID,ssdata)
                         '''if the save succeded uncheck the processing box'''
                         if debug == 'requests':
-                            print result
+                            print(result)
                         if result['resultCode'] == 0:
                             updateRow(sheetID,attachments[a]['parentId'],checkData)
                     '''Stop after only some menus?'''
@@ -423,4 +426,4 @@ if __name__ == '__main__':
                 if a>= len(attachments):
                     break
         if found == False:
-            print "ERROR"
+            print("ERROR")
