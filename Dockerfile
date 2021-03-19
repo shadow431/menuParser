@@ -12,5 +12,6 @@ ENV countLimit=False
 ENV debug=False
 ENV smartsheetDown=True
 ENV smartsheetUp=True
+ENV sslVerify=True
 
 CMD ["python3", "menuParser.py"]

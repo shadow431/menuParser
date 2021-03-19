@@ -3,6 +3,7 @@
   docker run --rm -e sheetID='<your_sheet_id>' -e ssToken='<your_smartsheet_api_token>' menuparser:latest
 
 <h3>menuPaser Environemnt Vairable options</h3>
+
   **sheetID** -- Requried
       This is the sheetID were it will grab the attachments, and upload the parsed data
   
@@ -30,6 +31,9 @@
   
   **smartsheetUP**
       Boolean used to set whether or not to upload the data once processed back up to smartsheet
+
+  **sslVerify**
+      Boolean used to set whether or not to verify SSL certs for Smartsheet
 
 <h2>Optimization test</h2>
 Original

@@ -16,32 +16,32 @@ TODO: replace with sdk
 '''
 def getSheet(sheetID):
     url = 'https://%s/2.0/sheets/%s'%(server,sheetID)
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, verify=sslVerify)
     rArr = r.json()
     return rArr
 
 def getAttachments(sheetID):
     url = 'https://%s/2.0/sheets/%s/attachments?includeAll=True'%(server,sheetID)
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, verify=sslVerify)
     rArr = r.json()
     return rArr
 
 def getAttachment(sheetID,attachmentID):
     url = 'https://%s/2.0/sheets/%s/attachments/%s'%(server,sheetID,attachmentID)
-    r = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers, verify=sslVerify)
     rArr = r.json()
     return rArr
 
 def insertRows(sheetId,data):
     jsonData = json.dumps(data)
     url = 'https://%s/2.0/sheets/%s/rows'%(server,sheetID)
-    r = requests.post(url, data=jsonData, headers=headers)
+    r = requests.post(url, data=jsonData, headers=headers, verify=sslVerify)
     return r.json()
 
 def updateRow(sheetId,rowId,data):
     data = json.dumps(data)
     url = 'https://%s/2.0/sheets/%s/rows'%(server,sheetID)
-    r = requests.put(url, data=data, headers=headers)
+    r = requests.put(url, data=data, headers=headers, verify=sslVerify)
     return r
 
 
@@ -342,6 +342,13 @@ if __name__ == '__main__':
     debug = os.getenv("debug")
     smartsheetDown = os.getenv("smartsheetDown") 
     smartsheetUp = os.getenv("smartsheetUp")
+
+    sslVerify = os.getenv("sslVerify")
+
+    if sslVerify == 'True':
+      sslVerify=True
+    else:
+      sslVerify=False
 
     if not sheetID:
       print("Please Provide a Sheet ID")
