@@ -35,12 +35,7 @@
   **sslVerify**
       Boolean used to set whether or not to verify SSL certs for Smartsheet
 
-<h2>Optimization test</h2>
-Original
-Fri Apr 17 08:31:31 PDT 2015
-Fri Apr 17 08:34:42 PDT 2015
 
-
-Test 1 - New Attacment processing
-Fri Apr 17 08:35:51 PDT 2015
-Fri Apr 17 08:39:10 PDT 2015
+<h3>TODO</h3>
+fix cook time calcs on unparsble pdfs
+better error handling when entering incorrect sheetID/Token/api enpoint
