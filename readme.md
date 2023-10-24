@@ -2,6 +2,13 @@
   docker build -t menuparser .
   docker run --rm -e sheetID='<your_sheet_id>' -e ssToken='<your_smartsheet_api_token>' -e meal_type='<Meal>|<Dessert>|<Recipe>' menuparser:latest
 
+  docker run --rm --env-file .env --env-file .env-desserts menuparser:latest
+  docker run --rm --env-file .env --env-file .env-desserts menuparser:latest
+  docker run --rm --env-file .env --env-file .env-occasions menuparser:latest
+
+  Run with pdf debuging and not uploading to smartsheet after
+  docker run --rm --env-file .env -e pdf_debug=debug -e smartsheetUp=False menuparser:latest
+
 <h3>menuPaser Environemnt Vairable options</h3>
 
   **sheetID** -- Requried
