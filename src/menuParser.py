@@ -304,7 +304,8 @@ def getMeals(pdf):
     for pageNumber,page in pages:
         pdf_logger.info('processing page %s of %s'%(pageNumber,totalPages))
         '''is it the last page? if so bail, its the shopping list'''
-        if pageCount == totalPages or len(meals) == 7:
+        pdf_logger.info('meals found so far: %s'%(len(meals)))
+        if pageCount == totalPages or len(meals) >= 8:
             pdf_logger.debug('last page or 7 meals found')
             break
 
@@ -533,4 +534,4 @@ if __name__ == '__main__':
                 if a>= len(attachments):
                     break
         if found == False:
-            print("ERROR")
+            parser_logger.info("No Attachment found for row: "+ str(row))
