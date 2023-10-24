@@ -282,7 +282,7 @@ def mealAssembly(data):
 '''
 this function takes a pdf and pulls the data and returns the full set of meals for the pdf
 '''
-def getMeals(pdf):
+def getMeals(pdf,meal_type):
     meals = []
     pdf_logger.info('setting up the paramaters for pdfminer')
     ''' Set parameters for pdf analysis.'''
@@ -354,7 +354,7 @@ def getMeals(pdf):
                 continue
             elif 'Grocery Items to Purchase' in item['text']:
                 break #this is the last page :\
-            elif re.search(r'^Meal \d',item['text']):
+            elif re.search(r'^%s \d'%(meal_type),item['text']):
                 data['mealNum'].append(item)
             else:
                 data['food'].append(item)
@@ -403,6 +403,7 @@ if __name__ == '__main__':
     pdf_debug = os.getenv("pdf_debug")
     smartsheetDown = os.getenv("smartsheetDown") 
     smartsheetUp = os.getenv("smartsheetUp")
+    meal_type = os.getenv("meal_type")
 
     sslVerify = os.getenv("sslVerify")
 
@@ -503,7 +504,7 @@ if __name__ == '__main__':
                         localfile.close()
                     '''process the PDF and get the meals back'''
                     try:
-                        meals = getMeals('tmp.pdf')
+                        meals = getMeals('tmp.pdf',meal_type)
                     except:
                         parser_logger.critical(("Failed: "+ str(row)))
                         parser_logger.critical((traceback.print_exc()))

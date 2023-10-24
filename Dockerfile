@@ -18,5 +18,6 @@ ENV parser_debug=False
 ENV smartsheetDown=True
 ENV smartsheetUp=True
 ENV sslVerify=True
+ENV meal_type='Meal'
 
 CMD ["python3", "menuParser.py"]
