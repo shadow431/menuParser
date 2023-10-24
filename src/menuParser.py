@@ -14,45 +14,33 @@ import re, json, requests, urllib.request, urllib.error, urllib.parse,traceback,
 
 #Logging
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(message)s')
+streamHandler = logging.StreamHandler(sys.stdout)
+streamHandler.setFormatter(formatter)
 
 #Main Logger
 parser_logFile='menuParser.log'
-#logging.basicConfig(level=logging.DEBUG,filename=logFile)
 parser_logger = logging.getLogger('menuparser')
-parser_streamHandler = logging.StreamHandler(sys.stdout)
 parser_logger.setLevel(logging.DEBUG)
 parser_fh = logging.FileHandler(parser_logFile)
-#fh.setLevel(logging.DEBUG)
 parser_fh.setFormatter(formatter)
-parser_streamHandler.setFormatter(formatter)
 parser_logger.addHandler(parser_fh)
-parser_logger.addHandler(parser_streamHandler)
+parser_logger.addHandler(streamHandler)
 
 #Smartsheet Logger
 smartsheet_logFile='menuParser-smartsheet.log'
-#logging.basicConfig(level=logging.DEBUG,filename=logFile)
 smartsheet_logger = logging.getLogger('menuparser.smartsheet')
-smartsheet_streamHandler = logging.StreamHandler(sys.stdout)
 smartsheet_logger.setLevel(logging.DEBUG)
 smartsheet_fh = logging.FileHandler(smartsheet_logFile)
-#fh.setLevel(logging.DEBUG)
 smartsheet_fh.setFormatter(formatter)
-smartsheet_streamHandler.setFormatter(formatter)
 smartsheet_logger.addHandler(smartsheet_fh)
-smartsheet_logger.addHandler(smartsheet_streamHandler)
 
 #pdf Logger
 pdf_logFile='menuParser-pdf.log'
-#logging.basicConfig(level=logging.DEBUG,filename=logFile)
 pdf_logger = logging.getLogger('menuparser.pdf')
-pdf_streamHandler = logging.StreamHandler(sys.stdout)
 pdf_logger.setLevel(logging.DEBUG)
 pdf_fh = logging.FileHandler(pdf_logFile)
-#fh.setLevel(logging.DEBUG)
 pdf_fh.setFormatter(formatter)
-pdf_streamHandler.setFormatter(formatter)
 pdf_logger.addHandler(pdf_fh)
-pdf_logger.addHandler(pdf_streamHandler)
 
 '''
 get the smartsheet data
@@ -121,14 +109,15 @@ def getColumns(sheet):
 Pull out and assemble the names of the dishes as well as the meal Type, if there is a type)
 '''
 def getDishes(food,height):
-    if debug == 'pdf': print(height)
+    pdf_logger.info('Getting the dishes')
+    pdf_logger.debug(height)
 
     menuLine =[]
     menuType = ''
 
-    '''Get the lines pertaining to this meail'''
+    '''Get the lines pertaining to this meal'''
     for line in food:
-        if debug == 'pdf': print(line)
+        pdf_logger.debug(line)
         if int(line['height']) in range(int(height)-100,int(height)):
             menuLine.append(line)
         elif int(line['height']) in range(int(height),int(height)+3) and line['width'] < 193.0:
@@ -140,7 +129,7 @@ def getDishes(food,height):
     or the first of the side dish name.  if it side dish has been set it is probably the second line of that
     '''
     for num,each in enumerate(menuLine):
-        if debug == 'pdf': print((str(num) + ' : ' + str(each)))
+        pdf_logger.debug((str(num) + ' : ' + str(each)))
         if num == 0:
             mainDish = each['text']
         elif num > 0:
@@ -171,6 +160,7 @@ def getDishes(food,height):
     mainDish = re.sub('\n',' ',mainDish.strip())
     sideDish = re.sub('\n',' ',sideDish.strip())
     menuType = re.sub('\n',' ',menuType.strip())
+    pdf_logger.debug("Main Dish: %s, Side Dish: %s, Menu Type: %s"%(mainDish,sideDish,menuType))
 
     return mainDish,sideDish,menuType
 
@@ -179,33 +169,40 @@ This function takes the ingrediends and the directions, gets the ones for the se
  and identifies the ingredients and directions secitons for use
 '''
 def getSteps(ingdir,height):
+    pdf_logger.info('Getting the steps')
+    pdf_logger.debug(height)
+    pdf_logger.debug(ingdir)
     items=[]
+    ingredients = ''
+    instructions = ''
 
     '''find the pieces'''
     for item in ingdir:
         if int(item['height']) in range(int(height),int(height)+20) and (item['width'] == 193.0 or item['width'] == 389.0):
-           if debug == 'pdf':
-               print(height)
-               print(item)
+           pdf_logger.debug("height: %s, item: %s"%(height,item))
            items.append(item)
 
     '''sort them by horizontal alignment'''
     items = sorted(items,key=itemgetter('width'))
-    if debug == 'pdf':
-        print("line 151")
-        print(items)
+    pdf_logger.debug(items)
     '''remove the words Ingredients and Instructions for the first meal on each page'''
-    if items[0]['text'].startswith('Ingredients:\n'):
-        items[0]['text'] = items[0]['text'][13:len(items[0]['text'])]
-    #else:
-    #    items[0]['text'] = items[0]['text']
-    if items[1]['text'].startswith('Instructions:\n'):
-        items[1]['text'] = items[1]['text'][15:len(items[1]['text'])]
-    #else:
-    #    items[1]['test'] = items[1]['text']
 
+    for item in items:
+        if item['width'] == 193.0:
+            if item['text'].startswith('Ingredients:\n'):
+                item['text'] = item['text'][13:len(item['text'])]
+            if item['text'] == '':
+                continue
+            ingredients = item['text'].strip()
+        elif item['width'] == 389.0:
+            if item['text'].startswith('Instructions:\n'):
+                item['text'] = item['text'][15:len(item['text'])]
+            if item['text'] == '':
+                continue
+            instructions = item['text'].strip()
 
-    return items[0]['text'].strip(),items[1]['text'].strip()
+    pdf_logger.debug("ingredients: %s, instructions: %s"%(ingredients,instructions))
+    return ingredients,instructions
 
 '''
 Take the times and identify them.
@@ -219,28 +216,32 @@ def getTimes(prep,cook,total,height):
     thisCook=' \n '
     thisPrep=' \n '
 
-
+    pdf_logger.info('Getting the times')
     '''locate times if we have them'''
     for each in prep:
         if int(each['height']) in range(int(height)-140,int(height)):
             thisPrep = each['text']
+            pdf_logger.debug(thisPrep)
     for each in cook:
         if int(each['height']) in range(int(height)-140,int(height)):
             thisCook = each['text']
+            pdf_logger.debug(thisCook)
     for each in total:
         if int(each['height']) in range(int(height)-140,int(height)):
             thisTotal = each['text']
+            pdf_logger.debug(thisTotal)
 
     '''Does thisCook contain to times? if so fix it'''
     try:
         thisCook
     except NameError:
-        print(thisTotal)
-        print(thisPrep)
+        pdf_logger.info('thisCook not set: total is %s, prep is %s'%(thisTotal,thisPrep))
         if ('Cook\n' in thisTotal and 'Total\n' in thisTotal):
+            pdf_logger.info('thisTotal has both cook and total, splitting itmes')
             thisCook,thisTotal=splitTimes(thisTotal)
     else:
         if ('Cook\n' in thisCook and 'Total\n' in thisCook):
+            pdf_logger.info('thisCook has both cook and total, splitting itmes')
             thisCook,thisTotal=splitTimes(thisCook)
 
     '''Return the times, but only the hours and minutes, we no longer need the words'''
@@ -269,6 +270,7 @@ def mealAssembly(data):
     for count,mealNum in enumerate(data['mealNum']):
         meal ={}
         meal['number'] = mealNum['text'].strip()
+        pdf_logger.debug('Meal number: %s'%(mealNum))
         meal['mainDish'],meal['sideDish'],meal['type'] = getDishes(data['food'],mealNum['height'])
         meal['prep'],meal['cook'],meal['total'] = getTimes(data['prep'],data['cook'],data['total'],mealNum['height'])
         meal['ingredients'],meal['instructions'] = getSteps(data['food'],mealNum['height'])
@@ -282,7 +284,7 @@ this function takes a pdf and pulls the data and returns the full set of meals f
 '''
 def getMeals(pdf):
     meals = []
-
+    pdf_logger.info('setting up the paramaters for pdfminer')
     ''' Set parameters for pdf analysis.'''
     laparams = LAParams()
     rsrcmgr = PDFResourceManager()
@@ -290,6 +292,7 @@ def getMeals(pdf):
     parser = PDFParser(fp)
     document = PDFDocument(parser)
 
+    pdf_logger.info('creating a PDF page aggregator object')
     ''' Create a PDF page aggregator object.'''
     device = PDFPageAggregator(rsrcmgr, laparams=laparams)
     interpreter = PDFPageInterpreter(rsrcmgr, device)
@@ -299,8 +302,10 @@ def getMeals(pdf):
 
     '''process each page'''
     for pageNumber,page in pages:
+        pdf_logger.info('processing page %s of %s'%(pageNumber,totalPages))
         '''is it the last page? if so bail, its the shopping list'''
         if pageCount == totalPages or len(meals) == 7:
+            pdf_logger.debug('last page or 7 meals found')
             break
 
         data = {}
@@ -333,6 +338,7 @@ def getMeals(pdf):
            create dictionary of meals with meal number hieght as key
            identify and sort everything at that level
         '''
+        pdf_logger.info('sorting the data')
         for item in pageList:
             if 'Prep\n' in item['text']:
                 data['prep'].append(item)
@@ -347,12 +353,12 @@ def getMeals(pdf):
                 continue
             elif 'Grocery Items to Purchase' in item['text']:
                 break #this is the last page :\
-            elif re.search('^Meal \d',item['text']):
+            elif re.search(r'^Meal \d',item['text']):
                 data['mealNum'].append(item)
             else:
                 data['food'].append(item)
-        if debug == 'pdf':
-            print(data)
+        pdf_logger.debug(data)
+        pdf_logger.info('assembling the meals from this page')
         meals = meals + mealAssembly(data)
         pageCount += 1
     return meals
