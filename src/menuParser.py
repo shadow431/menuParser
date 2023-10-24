@@ -6,9 +6,53 @@ from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfparser import PDFParser
 import pdfminer
+import logging
 from operator import itemgetter
 from dotenv import load_dotenv
 import re, json, requests, urllib.request, urllib.error, urllib.parse,traceback, os, sys
+
+
+#Logging
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(lineno)d - %(message)s')
+
+#Main Logger
+parser_logFile='menuParser.log'
+#logging.basicConfig(level=logging.DEBUG,filename=logFile)
+parser_logger = logging.getLogger('menuparser')
+parser_streamHandler = logging.StreamHandler(sys.stdout)
+parser_logger.setLevel(logging.DEBUG)
+parser_fh = logging.FileHandler(parser_logFile)
+#fh.setLevel(logging.DEBUG)
+parser_fh.setFormatter(formatter)
+parser_streamHandler.setFormatter(formatter)
+parser_logger.addHandler(parser_fh)
+parser_logger.addHandler(parser_streamHandler)
+
+#Smartsheet Logger
+smartsheet_logFile='menuParser-smartsheet.log'
+#logging.basicConfig(level=logging.DEBUG,filename=logFile)
+smartsheet_logger = logging.getLogger('menuparser.smartsheet')
+smartsheet_streamHandler = logging.StreamHandler(sys.stdout)
+smartsheet_logger.setLevel(logging.DEBUG)
+smartsheet_fh = logging.FileHandler(smartsheet_logFile)
+#fh.setLevel(logging.DEBUG)
+smartsheet_fh.setFormatter(formatter)
+smartsheet_streamHandler.setFormatter(formatter)
+smartsheet_logger.addHandler(smartsheet_fh)
+smartsheet_logger.addHandler(smartsheet_streamHandler)
+
+#pdf Logger
+pdf_logFile='menuParser-pdf.log'
+#logging.basicConfig(level=logging.DEBUG,filename=logFile)
+pdf_logger = logging.getLogger('menuparser.pdf')
+pdf_streamHandler = logging.StreamHandler(sys.stdout)
+pdf_logger.setLevel(logging.DEBUG)
+pdf_fh = logging.FileHandler(pdf_logFile)
+#fh.setLevel(logging.DEBUG)
+pdf_fh.setFormatter(formatter)
+pdf_streamHandler.setFormatter(formatter)
+pdf_logger.addHandler(pdf_fh)
+pdf_logger.addHandler(pdf_streamHandler)
 
 '''
 get the smartsheet data
@@ -111,7 +155,6 @@ def getDishes(food,height):
             elif diff > 20:
                 sideDish = each['text']
 
-    if debug == 'pdf': eval(input('Press Enter to Continue'))
 
     '''if main dish isnt set set it to be empyt to prevent futre error (Not a very common issue and can be resolved by hand.  later TODO'''
     try:
@@ -144,17 +187,23 @@ def getSteps(ingdir,height):
            if debug == 'pdf':
                print(height)
                print(item)
-               eval(input("Press any key to continue"))
            items.append(item)
 
     '''sort them by horizontal alignment'''
     items = sorted(items,key=itemgetter('width'))
-
+    if debug == 'pdf':
+        print("line 151")
+        print(items)
     '''remove the words Ingredients and Instructions for the first meal on each page'''
     if items[0]['text'].startswith('Ingredients:\n'):
         items[0]['text'] = items[0]['text'][13:len(items[0]['text'])]
+    #else:
+    #    items[0]['text'] = items[0]['text']
     if items[1]['text'].startswith('Instructions:\n'):
         items[1]['text'] = items[1]['text'][15:len(items[1]['text'])]
+    #else:
+    #    items[1]['test'] = items[1]['text']
+
 
     return items[0]['text'].strip(),items[1]['text'].strip()
 
@@ -166,7 +215,10 @@ if cook and total times are pieced into one then seperate them
     instead of indivitual times
 '''
 def getTimes(prep,cook,total,height):
-    thisTotal=''
+    thisTotal=' \n '
+    thisCook=' \n '
+    thisPrep=' \n '
+
 
     '''locate times if we have them'''
     for each in prep:
@@ -223,7 +275,6 @@ def mealAssembly(data):
         meals.append(meal)
     if debug == 'pdf':
         print(meals)
-        eval(input("press enter to continue..."))
     return meals
 
 '''
@@ -277,7 +328,7 @@ def getMeals(pdf):
         '''
         take a best guess at the contect of each text block
         break like types into seperate pieces
-        Performance help:
+        Performance help:parser_
            put everything but meal number into one list.
            create dictionary of meals with meal number hieght as key
            identify and sort everything at that level
@@ -302,7 +353,6 @@ def getMeals(pdf):
                 data['food'].append(item)
         if debug == 'pdf':
             print(data)
-            eval(input('Press any key to continue....'))
         meals = meals + mealAssembly(data)
         pageCount += 1
     return meals
@@ -331,19 +381,44 @@ def prepData(meals, rowID, columnIds):
 Main loop
 '''
 if __name__ == '__main__':
+    parser_logger.info('Starting')
     bail = False
+    debug = 'depreicated'
 
     load_dotenv()
-
+    parser_logger.info('Reading in Config')
     sheetID = os.getenv("sheetID") #Req
     ssToken = os.getenv("ssToken") #Req
     server  = os.getenv("server")
     countLimit = os.getenv("countLimit")
-    debug = os.getenv("debug")
+    parser_debug = os.getenv("parser_debug")
+    smartsheet_debug = os.getenv("smartsheet_debug")
+    pdf_debug = os.getenv("pdf_debug")
     smartsheetDown = os.getenv("smartsheetDown") 
     smartsheetUp = os.getenv("smartsheetUp")
 
     sslVerify = os.getenv("sslVerify")
+
+    parser_logger.info('Setting levels for Logging')
+
+    log_levels = {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+        "critical": logging.CRITICAL,
+    }
+
+    parser_log_level = log_levels.get(parser_debug, logging.INFO)
+    parser_logger.setLevel(parser_log_level)
+
+    smartsheet_logger.info('Setting levels for Logging')
+    smartsheet_log_level = log_levels.get(smartsheet_debug, logging.INFO)
+    smartsheet_logger.setLevel(smartsheet_log_level)
+
+    pdf_logger.info('Setting levels for Logging')
+    pdf_log_level = log_levels.get(pdf_debug, logging.INFO)
+    pdf_logger.setLevel(pdf_log_level)
 
     if sslVerify == 'True':
       sslVerify=True
@@ -351,11 +426,11 @@ if __name__ == '__main__':
       sslVerify=False
 
     if not sheetID:
-      print("Please Provide a Sheet ID")
+      parser_logger.error("Please Provide a Sheet ID")
       bail=True
 
     if not ssToken:
-      print("Please Provide a Smartsheet API token")
+      parser_logger.error("Please Provide a Smartsheet API token")
       bail=True
 
     if bail:
@@ -368,21 +443,18 @@ if __name__ == '__main__':
 
     '''get sheet data'''
     sheet = getSheet(sheetID)
-    if debug == 'smartsheet':
-        print(sheet)
-        eval(input("Press Enter to continue..."))
+    #if debug == 'smartsheet':
+    smartsheet_logger.debug(sheet)
 
     '''build list of columns'''
     columnId = getColumns(sheet)
-    if debug == 'smartsheet':
-        print(columnId)
-        eval(input("Press Enter to continue..."))
+    #if debug == 'smartsheet':
+    smartsheet_logger.debug(columnId)
 
     '''Get list of attachments'''
     attachments = getAttachments(sheetID)
-    if debug == 'smartsheet':
-        print(attachments)
-        eval(input("Press Enter to continue..."))
+    #if debug == 'smartsheet':
+    smartsheet_logger.debug(attachments)
 
     rows = []
     count = 0
@@ -396,9 +468,9 @@ if __name__ == '__main__':
                         rows.append(each['id'])
                 except KeyError:
                     continue
-    if debug == 'smartsheet':
-        print(rows)
-        eval(input("Press Enter to continue..."))
+    #if debug == 'smartsheet':
+    smartsheet_logger.debug(rows)
+
     '''
     Performance Help:
        Run through the list of rows to be processed and select out only the needed attachments?
@@ -426,16 +498,15 @@ if __name__ == '__main__':
                     try:
                         meals = getMeals('tmp.pdf')
                     except:
-                        print(("Failed: "+ str(row)))
-                        print((traceback.print_exc()))
+                        parser_logger.critical(("Failed: "+ str(row)))
+                        parser_logger.critical((traceback.print_exc()))
                         break
-                    if debug == 'approve':
-                        print((attachment['name']))
+                    if pdf_debug == 'debug':
+                        pdf_logger.debug(attachmentObj['name'])
                         for meal in meals:
-                            print("New Meal")
+                            pdf_logger.debug("New Meal")
                             for part in meal:
-                                print((part + ': ' + meal[part]))
-                                eval(input("Press Enter For Next"))
+                                pdf_logger.debug(part + ': ' + meal[part])
                     '''get the dictionary ready for smartsheet'''
                     ssdata = prepData(meals, attachments[a]['parentId'],columnId)
                     '''prepare to uncheck the box so it doesn't get reprocessed'''
