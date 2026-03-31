@@ -9,6 +9,7 @@ import pdfminer
 import logging
 from operator import itemgetter
 from dotenv import load_dotenv
+import hashlib
 import re, json, requests, urllib.request, urllib.error, urllib.parse,traceback, os, sys
 
 
@@ -75,6 +76,132 @@ def updateRow(sheetId,rowId,data):
     url = 'https://%s/2.0/sheets/%s/rows'%(server,sheetID)
     r = requests.put(url, data=data, headers=headers, verify=sslVerify)
     return r
+
+def parse_bool(value, default=False):
+    if value is None:
+        return default
+    return str(value).strip().lower() in ('true', '1', 'yes', 'y', 'on')
+
+
+def mealie_get_recipes(search_term):
+    url = '%s/api/recipes'%(mealie_url)
+    params = {
+        'search': search_term,
+        'perPage': 50,
+    }
+    response = requests.get(url, params=params, headers=mealie_headers, verify=sslVerify)
+    if response.status_code >= 300:
+        parser_logger.error('Mealie recipe search failed (%s): %s', response.status_code, response.text)
+        return []
+    payload = response.json()
+    return payload.get('items', [])
+
+
+def mealie_get_recipe(slug):
+    url = '%s/api/recipes/%s'%(mealie_url, slug)
+    response = requests.get(url, headers=mealie_headers, verify=sslVerify)
+    if response.status_code >= 300:
+        parser_logger.error('Mealie get recipe failed (%s): %s', response.status_code, response.text)
+        return None
+    return response.json()
+
+
+def find_mealie_recipe_slug(menu_key, recipe_name):
+    recipes = mealie_get_recipes(recipe_name)
+    for recipe in recipes:
+        slug = recipe.get('slug')
+        if not slug:
+            continue
+        recipe_detail = mealie_get_recipe(slug)
+        if not recipe_detail:
+            continue
+        extras = recipe_detail.get('extras') or {}
+        if extras.get('menuParserKey') == menu_key:
+            return slug
+    return None
+
+
+def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
+    recipe_name = meal['mainDish']
+    if meal['sideDish']:
+        recipe_name = recipe_name + ' + ' + meal['sideDish']
+
+    menu_key_source = '%s|%s|%s|%s|%s'%(plan_source, meal_type, meal.get('number', ''), meal.get('mainDish', ''), meal.get('sideDish', ''))
+    menu_key = hashlib.sha1(menu_key_source.encode('utf-8')).hexdigest()
+
+    ingredients = []
+    for ingredient_line in meal.get('ingredients', '').split('\n'):
+        ingredient_line = ingredient_line.strip()
+        if ingredient_line:
+            ingredients.append({'originalText': ingredient_line})
+
+    instructions = []
+    for instruction_line in meal.get('instructions', '').split('\n'):
+        instruction_line = instruction_line.strip()
+        if instruction_line:
+            instructions.append({'text': instruction_line})
+
+    payload = {
+        'name': recipe_name,
+        'description': 'Imported from eMeals plan: %s'%(plan_source),
+        'prepTime': meal.get('prep', ''),
+        'cookTime': meal.get('cook', ''),
+        'totalTime': meal.get('total', ''),
+        'recipeIngredient': ingredients,
+        'recipeInstructions': instructions,
+        'extras': {
+            'menuParserKey': menu_key,
+            'menuPlanSource': plan_source,
+            'menuType': meal_type,
+            'mealNumber': meal.get('number', ''),
+            'sourceSmartsheetRowId': str(source_row_id),
+        }
+    }
+    return payload, menu_key
+
+
+def upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id):
+    payload, menu_key = build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id)
+    existing_slug = find_mealie_recipe_slug(menu_key, payload['name'])
+
+    if existing_slug:
+        patch_url = '%s/api/recipes/%s'%(mealie_url, existing_slug)
+        response = requests.patch(patch_url, data=json.dumps(payload), headers=mealie_headers, verify=sslVerify)
+        if response.status_code >= 300:
+            parser_logger.error('Failed updating Mealie recipe (%s): %s', response.status_code, response.text)
+            return False
+        parser_logger.info('Updated Mealie recipe: %s', payload['name'])
+        return True
+
+    create_url = '%s/api/recipes'%(mealie_url)
+    create_response = requests.post(create_url, data=json.dumps({'name': payload['name']}), headers=mealie_headers, verify=sslVerify)
+    if create_response.status_code >= 300:
+        parser_logger.error('Failed creating Mealie recipe shell (%s): %s', create_response.status_code, create_response.text)
+        return False
+
+    create_body = create_response.json()
+    created_slug = create_body if isinstance(create_body, str) else create_body.get('slug')
+    if not created_slug:
+        parser_logger.error('Unable to determine created Mealie slug for: %s', payload['name'])
+        return False
+
+    patch_url = '%s/api/recipes/%s'%(mealie_url, created_slug)
+    update_response = requests.patch(patch_url, data=json.dumps(payload), headers=mealie_headers, verify=sslVerify)
+    if update_response.status_code >= 300:
+        parser_logger.error('Failed updating created Mealie recipe (%s): %s', update_response.status_code, update_response.text)
+        return False
+
+    parser_logger.info('Created Mealie recipe: %s', payload['name'])
+    return True
+
+
+def upload_meals_to_mealie(meals, meal_type, plan_source, source_row_id):
+    all_success = True
+    for meal in meals:
+        result = upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id)
+        if not result:
+            all_success = False
+    return all_success
 
 
 '''
@@ -403,6 +530,9 @@ if __name__ == '__main__':
     pdf_debug = os.getenv("pdf_debug")
     smartsheetDown = os.getenv("smartsheetDown") 
     smartsheetUp = os.getenv("smartsheetUp")
+    mealieUp = os.getenv("mealieUp")
+    mealie_url = os.getenv("mealie_url")
+    mealie_api_token = os.getenv("mealie_api_token")
     meal_type = os.getenv("meal_type")
 
     sslVerify = os.getenv("sslVerify")
@@ -420,18 +550,23 @@ if __name__ == '__main__':
     parser_log_level = log_levels.get(parser_debug, logging.INFO)
     parser_logger.setLevel(parser_log_level)
 
-    smartsheet_logger.info('Setting levels for Logging')
-    smartsheet_log_level = log_levels.get(smartsheet_debug, logging.INFO)
-    smartsheet_logger.setLevel(smartsheet_log_level)
+    if True:
 
-    pdf_logger.info('Setting levels for Logging')
-    pdf_log_level = log_levels.get(pdf_debug, logging.INFO)
-    pdf_logger.setLevel(pdf_log_level)
+        smartsheet_logger.info('Setting levels for Logging')
+        smartsheet_log_level = log_levels.get(smartsheet_debug, logging.INFO)
+        smartsheet_logger.setLevel(smartsheet_log_level)
 
-    if sslVerify == 'True':
-      sslVerify=True
-    else:
-      sslVerify=False
+        pdf_logger.info('Setting levels for Logging')
+        pdf_log_level = log_levels.get(pdf_debug, logging.INFO)
+        pdf_logger.setLevel(pdf_log_level)
+
+        if sslVerify == 'True':
+            sslVerify=True
+        else:
+            sslVerify=False
+
+        smartsheet_upload_enabled = parse_bool(smartsheetUp, True)
+        mealie_upload_enabled = parse_bool(mealieUp, False)
 
     if not sheetID:
       parser_logger.error("Please Provide a Sheet ID")
@@ -449,6 +584,22 @@ if __name__ == '__main__':
 
     headers = {'Authorization': 'Bearer '+str(ssToken)}
 
+    mealie_headers = {
+        'Authorization': 'Bearer '+str(mealie_api_token),
+        'Content-Type': 'application/json'
+    }
+
+    if mealie_upload_enabled and not mealie_url:
+        parser_logger.error('mealieUp=True but mealie_url is missing')
+        bail = True
+
+    if mealie_upload_enabled and not mealie_api_token:
+        parser_logger.error('mealieUp=True but mealie_api_token is missing')
+        bail = True
+
+    if bail:
+        sys.exit("Missing Required Variables")
+
     '''get sheet data'''
     sheet = getSheet(sheetID)
     #if debug == 'smartsheet':
@@ -465,7 +616,13 @@ if __name__ == '__main__':
     smartsheet_logger.debug(attachments)
 
     rows = []
+    child_row_parent_ids = set()
     count = 0
+
+    for each in sheet['rows']:
+        parent_id = each.get('parentId')
+        if parent_id:
+            child_row_parent_ids.add(parent_id)
 
     '''see if the row needs to be processed'''
     for each in sheet['rows']:
@@ -495,9 +652,11 @@ if __name__ == '__main__':
                 if attachments[a]['parentId'] == row and attachments[a]['parentType'] == 'ROW':
                     found = True
                     count += 1 #debug
+                    attachment_name = attachments[a].get('name', 'unknown-plan.pdf')
                     if smartsheetDown == 'True':
                         '''get attachment url and download the pdf'''
                         attachmentObj = getAttachment(sheetID,attachments[a]['id'])
+                        attachment_name = attachmentObj.get('name', attachment_name)
                         fh = urllib.request.urlopen(attachmentObj['url'])
                         localfile = open('tmp.pdf','wb')
                         localfile.write(fh.read())
@@ -510,23 +669,36 @@ if __name__ == '__main__':
                         parser_logger.critical((traceback.print_exc()))
                         break
                     if pdf_debug == 'debug':
-                        pdf_logger.debug(attachmentObj['name'])
+                        pdf_logger.debug(attachment_name)
                         for meal in meals:
                             pdf_logger.debug("New Meal")
                             for part in meal:
                                 pdf_logger.debug(part + ': ' + meal[part])
-                    '''get the dictionary ready for smartsheet'''
-                    ssdata = prepData(meals, attachments[a]['parentId'],columnId)
-                    '''prepare to uncheck the box so it doesn't get reprocessed'''
-                    checkData = {"id":attachments[a]['parentId'],"cells":[{"columnId":columnId['process'], "value":False}]}
-                    if smartsheetUp == 'True':
-                        '''upload the data'''
+
+                    parent_has_children = attachments[a]['parentId'] in child_row_parent_ids
+                    smartsheet_success = True
+                    mealie_success = True
+
+                    if smartsheet_upload_enabled and not parent_has_children:
+                        '''get the dictionary ready for smartsheet'''
+                        ssdata = prepData(meals, attachments[a]['parentId'],columnId)
                         result = insertRows(sheetID,ssdata)
-                        '''if the save succeded uncheck the processing box'''
                         if debug == 'requests':
                             print(result)
-                        if result['resultCode'] == 0:
-                            updateRow(sheetID,attachments[a]['parentId'],checkData)
+                        if result.get('resultCode') != 0:
+                            smartsheet_success = False
+                            smartsheet_logger.error('Failed inserting child rows for parent %s: %s', attachments[a]['parentId'], result)
+                    elif smartsheet_upload_enabled and parent_has_children:
+                        parser_logger.info('Parent row %s already has child rows, skipping Smartsheet insert and syncing only other targets', attachments[a]['parentId'])
+
+                    if mealie_upload_enabled:
+                        mealie_success = upload_meals_to_mealie(meals, meal_type, attachment_name, attachments[a]['parentId'])
+
+                    any_upload_target = smartsheet_upload_enabled or mealie_upload_enabled
+                    if any_upload_target and smartsheet_success and mealie_success:
+                        '''prepare to uncheck the box so it doesn't get reprocessed'''
+                        checkData = {"id":attachments[a]['parentId'],"cells":[{"columnId":columnId['process'], "value":False}]}
+                        updateRow(sheetID,attachments[a]['parentId'],checkData)
                     '''Stop after only some menus?'''
                     if countLimit == 'True':
                         if count > 0:

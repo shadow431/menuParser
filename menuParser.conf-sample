@@ -5,3 +5,7 @@ countLimit = False
 debug = False
 smartsheetDown = True
 smartsheetUp = True
+
+mealieUp = False
+mealie_url = 'https://mealie.example.com'
+mealie_api_token = '<mealie_api_token_here>'

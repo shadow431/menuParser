@@ -46,6 +46,20 @@
   
   **smartsheetUP**
       Boolean used to set whether or not to upload the data once processed back up to smartsheet
+      If True and the selected parent row already has child rows, the parser will skip Smartsheet insert
+      and continue with other enabled upload targets (for example Mealie).
+
+  **mealieUp**
+      Boolean used to set whether recipes are uploaded to Mealie via API
+
+  **mealie_url**
+      Base URL for your Mealie instance (example: https://mealie.example.com)
+
+  **mealie_api_token**
+      Long-lived API token created in Mealie user profile
+
+  When Mealie upload is enabled, each recipe is created/updated with `extras` metadata including
+  the source meal plan filename, meal number/type, and source Smartsheet row ID.
 
   **sslVerify**
       Boolean used to set whether or not to verify SSL certs for Smartsheet

@@ -17,6 +17,8 @@ ENV pdf_debug=False
 ENV parser_debug=False
 ENV smartsheetDown=True
 ENV smartsheetUp=True
+ENV mealieUp=False
+ENV mealie_url=''
 ENV sslVerify=True
 ENV meal_type='Meal'
 
