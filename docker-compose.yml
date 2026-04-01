@@ -1,0 +1,65 @@
+services:
+  smartsheet-viewer:
+    build:
+      context: ./smartsheet-viewer
+    container_name: smartsheet-viewer
+    restart: unless-stopped
+    ports:
+      - "${SMARTSHEET_VIEWER_PORT:-8088}:8080"
+    environment:
+      SS_TOKEN: "${ssToken}"
+      SHEET_ID: "${sheetID}"
+      SMARTSHEET_SERVER: "${server:-api.smartsheet.com}"
+      SSL_VERIFY: "${sslVerify:-true}"
+      MEALIE_URL: "${MEALIE_INTERNAL_URL:-http://mealie:9000}"
+      MEALIE_API_TOKEN: "${mealie_api_token}"
+    networks:
+      default:
+        aliases:
+          - recipes.example.com
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.14.0
+    container_name: mealie
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${MEALIE_PORT:-9925}:9000"
+    environment:
+      ALLOW_SIGNUP: "${MEALIE_ALLOW_SIGNUP:-true}"
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      TZ: "${TZ:-America/Chicago}"
+      BASE_URL: "${MEALIE_BASE_URL:-http://localhost:9925}"
+      DB_ENGINE: postgres
+      POSTGRES_USER: "${POSTGRES_USER:-mealie}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-change-me}"
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: "${POSTGRES_DB:-mealie}"
+    volumes:
+      - mealie-data:/app/data/
+
+  postgres:
+    image: postgres:17
+    container_name: mealie-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-mealie}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-change-me}"
+      POSTGRES_DB: "${POSTGRES_DB:-mealie}"
+      PGUSER: "${POSTGRES_USER:-mealie}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mealie} -d ${POSTGRES_DB:-mealie}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    volumes:
+      - mealie-pgdata:/var/lib/postgresql/data
+
+volumes:
+  mealie-data:
+  mealie-pgdata:

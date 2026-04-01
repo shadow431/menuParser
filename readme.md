@@ -9,6 +9,50 @@
   Run with pdf debuging and not uploading to smartsheet after
   docker run --rm --env-file .env -e pdf_debug=debug -e smartsheetUp=False menuparser:latest
 
+<h3>Smartsheet Recipe HTML Viewer</h3>
+
+  Quick container that reads recipe rows directly from Smartsheet and serves HTML pages (one recipe per page).
+
+  Run with compose (using your existing env files for `ssToken` + `sheetID`):
+
+      docker compose --env-file .env --env-file .env-meals up -d --build smartsheet-viewer
+
+  Open:
+
+      http://localhost:8088
+
+  Notes:
+  - Index page lists recipes.
+  - Each recipe links to `/recipe/<rowId>`.
+  - This reads Smartsheet live on each request.
+    - If Mealie URL import rejects the domain (`InvalidDomainError`), open a recipe page
+        and use **Import This Recipe to Mealie**. This uses Mealie `create/html-or-json`
+        and bypasses domain restrictions.
+
+<h3>Run Mealie Locally with Docker Compose</h3>
+
+  Files added for Mealie:
+  - compose.mealie.yml
+  - compose.mealie.nfs.yml
+  - mealie.env.sample
+
+  Recommended default is local Docker volumes with PostgreSQL:
+
+  1. Copy mealie.env.sample to .env.mealie and adjust values
+  2. Start Mealie locally:
+      docker compose --env-file .env.mealie -f compose.mealie.yml up -d
+  3. Open Mealie at the URL defined by MEALIE_BASE_URL (default http://localhost:9925)
+
+  Optional NFS-backed storage:
+
+      docker compose --env-file .env.mealie -f compose.mealie.yml -f compose.mealie.nfs.yml up -d
+
+  Notes:
+  - This stack uses PostgreSQL because Mealie docs warn against SQLite on NAS/NFS.
+  - Local volumes are the safest default.
+  - NFS is available as an override, but live PostgreSQL data on NFS can be less reliable than local disk.
+     Best practice is local runtime storage plus backups exported to NFS.
+
 <h3>menuPaser Environemnt Vairable options</h3>
 
   **sheetID** -- Requried

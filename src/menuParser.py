@@ -43,6 +43,8 @@ pdf_fh = logging.FileHandler(pdf_logFile)
 pdf_fh.setFormatter(formatter)
 pdf_logger.addHandler(pdf_fh)
 
+mealie_ingredient_nlp_enabled = False
+
 '''
 get the smartsheet data
 TODO: replace with sdk
@@ -83,8 +85,165 @@ def parse_bool(value, default=False):
     return str(value).strip().lower() in ('true', '1', 'yes', 'y', 'on')
 
 
+def normalize_ingredient_lines(raw_ingredients):
+    ingredient_lines = []
+    for ingredient_line in raw_ingredients.split('\n'):
+        ingredient_line = ingredient_line.strip()
+        if not ingredient_line:
+            continue
+        if re.match(r'^[-—_]{5,}$', ingredient_line):
+            continue
+        ingredient_lines.append(ingredient_line)
+    return ingredient_lines
+
+
+def build_raw_ingredient(line):
+    return {
+        'originalText': line,
+        'title': line,
+    }
+
+
+def should_fallback_to_raw_ingredient(source_line, parsed_ingredient):
+    if not parsed_ingredient:
+        return True
+
+    source = (source_line or '').strip().lower()
+    display = str(parsed_ingredient.get('display') or '').strip().lower()
+    note = str(parsed_ingredient.get('note') or '').strip().lower()
+    food_name = str(((parsed_ingredient.get('food') or {}).get('name')) or '').strip().lower()
+
+    if '(' in source and ')' in source:
+        return True
+
+    if re.search(r'\b(pkg|package)\b', source):
+        return True
+
+    if re.search(r'[¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]', source):
+        return True
+
+    if ' or ' in display or note.startswith('or '):
+        return True
+
+    if food_name in ('pkg', 'package'):
+        return True
+
+    return False
+
+
+def normalize_mealie_url(raw_url):
+    if not raw_url:
+        return raw_url
+    normalized = str(raw_url).strip().rstrip('/')
+    if normalized.endswith('/api'):
+        normalized = normalized[:-4]
+    return normalized
+
+
+def mealie_build_url(path):
+    base = (mealie_url or '').rstrip('/')
+    if not path.startswith('/'):
+        path = '/' + path
+    return '%s%s'%(base, path)
+
+
+def mealie_preflight_check():
+    openapi_url = mealie_build_url('/openapi.json')
+    try:
+        response = requests.get(openapi_url, headers=mealie_headers, verify=sslVerify, timeout=15)
+    except requests.RequestException as exc:
+        parser_logger.error('Mealie preflight failed connecting to %s: %s', openapi_url, exc)
+        return False
+
+    if response.status_code >= 300:
+        parser_logger.error('Mealie preflight failed (%s) at %s: %s', response.status_code, openapi_url, response.text)
+        return False
+
+    try:
+        payload = response.json()
+    except ValueError:
+        body_preview = (response.text or '').strip().replace('\n', ' ')[:200]
+        parser_logger.error('Mealie preflight expected JSON at %s but got non-JSON response: %s', openapi_url, body_preview)
+        return False
+
+    api_title = ((payload.get('info') or {}).get('title') or '').strip().lower()
+    if api_title != 'mealie':
+        parser_logger.error('Mealie preflight found unexpected API title at %s: %s', openapi_url, api_title or '<missing>')
+        return False
+
+    return True
+
+
+def mealie_parse_ingredients(ingredient_lines):
+    if not ingredient_lines:
+        return []
+
+    parse_url = mealie_build_url('/api/parser/ingredient')
+    filtered_lines = []
+    for line in ingredient_lines:
+        stripped = (line or '').strip()
+        if not stripped:
+            continue
+        if re.match(r'^[-—_]{5,}$', stripped):
+            continue
+        filtered_lines.append(stripped)
+
+    if not filtered_lines:
+        return []
+
+    structured = []
+    for source_line in filtered_lines:
+        parse_payload = {
+            'ingredient': source_line,
+        }
+
+        try:
+            response = requests.post(parse_url, data=json.dumps(parse_payload), headers=mealie_headers, verify=sslVerify, timeout=30)
+        except requests.RequestException as exc:
+            parser_logger.warning('Mealie ingredient parse request failed for "%s": %s', source_line, exc)
+            structured.append(build_raw_ingredient(source_line))
+            continue
+
+        if response.status_code >= 300:
+            parser_logger.warning('Mealie ingredient parse failed (%s) for "%s": %s', response.status_code, source_line, response.text)
+            structured.append(build_raw_ingredient(source_line))
+            continue
+
+        try:
+            parsed_payload = response.json()
+        except ValueError:
+            parser_logger.warning('Mealie ingredient parse returned invalid JSON for "%s": %s', source_line, response.text)
+            structured.append(build_raw_ingredient(source_line))
+            continue
+
+        ingredient = (parsed_payload or {}).get('ingredient') or {}
+        if should_fallback_to_raw_ingredient(source_line, ingredient):
+            structured.append(build_raw_ingredient(source_line))
+            continue
+
+        unit_obj = ingredient.get('unit') or {}
+        food_obj = ingredient.get('food') or {}
+
+        normalized = {
+            'quantity': ingredient.get('quantity'),
+            'unit': {
+                'id': unit_obj.get('id'),
+                'name': unit_obj.get('name'),
+            } if unit_obj.get('id') and unit_obj.get('name') else None,
+            'food': {
+                'id': food_obj.get('id'),
+                'name': food_obj.get('name'),
+            } if food_obj.get('id') and food_obj.get('name') else None,
+            'note': ingredient.get('note') or '',
+            'title': source_line,
+            'originalText': source_line,
+        }
+        structured.append(normalized)
+    return structured
+
+
 def mealie_get_recipes(search_term):
-    url = '%s/api/recipes'%(mealie_url)
+    url = mealie_build_url('/api/recipes')
     params = {
         'search': search_term,
         'perPage': 50,
@@ -98,7 +257,7 @@ def mealie_get_recipes(search_term):
 
 
 def mealie_get_recipe(slug):
-    url = '%s/api/recipes/%s'%(mealie_url, slug)
+    url = mealie_build_url('/api/recipes/%s'%(slug))
     response = requests.get(url, headers=mealie_headers, verify=sslVerify)
     if response.status_code >= 300:
         parser_logger.error('Mealie get recipe failed (%s): %s', response.status_code, response.text)
@@ -108,17 +267,20 @@ def mealie_get_recipe(slug):
 
 def find_mealie_recipe_slug(menu_key, recipe_name):
     recipes = mealie_get_recipes(recipe_name)
+    name_match_slug = None
     for recipe in recipes:
         slug = recipe.get('slug')
         if not slug:
             continue
+        if recipe.get('name') == recipe_name and not name_match_slug:
+            name_match_slug = slug
         recipe_detail = mealie_get_recipe(slug)
         if not recipe_detail:
             continue
         extras = recipe_detail.get('extras') or {}
         if extras.get('menuParserKey') == menu_key:
             return slug
-    return None
+    return name_match_slug
 
 
 def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
@@ -129,17 +291,30 @@ def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
     menu_key_source = '%s|%s|%s|%s|%s'%(plan_source, meal_type, meal.get('number', ''), meal.get('mainDish', ''), meal.get('sideDish', ''))
     menu_key = hashlib.sha1(menu_key_source.encode('utf-8')).hexdigest()
 
-    ingredients = []
-    for ingredient_line in meal.get('ingredients', '').split('\n'):
-        ingredient_line = ingredient_line.strip()
-        if ingredient_line:
-            ingredients.append({'originalText': ingredient_line})
+    ingredient_lines = normalize_ingredient_lines(meal.get('ingredients', ''))
 
-    instructions = []
+    ingredients = []
+    for ingredient_line in ingredient_lines:
+        ingredients.append({
+            'note': ingredient_line,
+            'originalText': ingredient_line,
+            'title': ingredient_line,
+        })
+
+    instruction_lines = []
     for instruction_line in meal.get('instructions', '').split('\n'):
         instruction_line = instruction_line.strip()
         if instruction_line:
-            instructions.append({'text': instruction_line})
+            instruction_lines.append(instruction_line)
+
+    instructions = []
+    if instruction_lines:
+        instructions.append({
+            'title': '',
+            'summary': '',
+            'text': ' '.join(instruction_lines),
+            'ingredientReferences': [],
+        })
 
     payload = {
         'name': recipe_name,
@@ -165,7 +340,8 @@ def upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id):
     existing_slug = find_mealie_recipe_slug(menu_key, payload['name'])
 
     if existing_slug:
-        patch_url = '%s/api/recipes/%s'%(mealie_url, existing_slug)
+        payload['slug'] = existing_slug
+        patch_url = mealie_build_url('/api/recipes/%s'%(existing_slug))
         response = requests.patch(patch_url, data=json.dumps(payload), headers=mealie_headers, verify=sslVerify)
         if response.status_code >= 300:
             parser_logger.error('Failed updating Mealie recipe (%s): %s', response.status_code, response.text)
@@ -173,7 +349,7 @@ def upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id):
         parser_logger.info('Updated Mealie recipe: %s', payload['name'])
         return True
 
-    create_url = '%s/api/recipes'%(mealie_url)
+    create_url = mealie_build_url('/api/recipes')
     create_response = requests.post(create_url, data=json.dumps({'name': payload['name']}), headers=mealie_headers, verify=sslVerify)
     if create_response.status_code >= 300:
         parser_logger.error('Failed creating Mealie recipe shell (%s): %s', create_response.status_code, create_response.text)
@@ -185,7 +361,8 @@ def upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id):
         parser_logger.error('Unable to determine created Mealie slug for: %s', payload['name'])
         return False
 
-    patch_url = '%s/api/recipes/%s'%(mealie_url, created_slug)
+    payload['slug'] = created_slug
+    patch_url = mealie_build_url('/api/recipes/%s'%(created_slug))
     update_response = requests.patch(patch_url, data=json.dumps(payload), headers=mealie_headers, verify=sslVerify)
     if update_response.status_code >= 300:
         parser_logger.error('Failed updating created Mealie recipe (%s): %s', update_response.status_code, update_response.text)
@@ -531,7 +708,8 @@ if __name__ == '__main__':
     smartsheetDown = os.getenv("smartsheetDown") 
     smartsheetUp = os.getenv("smartsheetUp")
     mealieUp = os.getenv("mealieUp")
-    mealie_url = os.getenv("mealie_url")
+    mealie_parse_ingredients_setting = os.getenv("mealie_parse_ingredients")
+    mealie_url = normalize_mealie_url(os.getenv("mealie_url"))
     mealie_api_token = os.getenv("mealie_api_token")
     meal_type = os.getenv("meal_type")
 
@@ -567,6 +745,7 @@ if __name__ == '__main__':
 
         smartsheet_upload_enabled = parse_bool(smartsheetUp, True)
         mealie_upload_enabled = parse_bool(mealieUp, False)
+        mealie_ingredient_nlp_enabled = parse_bool(mealie_parse_ingredients_setting, False)
 
     if not sheetID:
       parser_logger.error("Please Provide a Sheet ID")
@@ -596,6 +775,11 @@ if __name__ == '__main__':
     if mealie_upload_enabled and not mealie_api_token:
         parser_logger.error('mealieUp=True but mealie_api_token is missing')
         bail = True
+
+    if mealie_upload_enabled and not bail:
+        if not mealie_preflight_check():
+            parser_logger.error('mealieUp=True but Mealie API preflight check failed for mealie_url=%s', mealie_url)
+            bail = True
 
     if bail:
         sys.exit("Missing Required Variables")
@@ -690,6 +874,9 @@ if __name__ == '__main__':
                             smartsheet_logger.error('Failed inserting child rows for parent %s: %s', attachments[a]['parentId'], result)
                     elif smartsheet_upload_enabled and parent_has_children:
                         parser_logger.info('Parent row %s already has child rows, skipping Smartsheet insert and syncing only other targets', attachments[a]['parentId'])
+                    elif not smartsheet_upload_enabled:
+                        parser_logger.info('Smartsheet upload disabled, skipping Smartsheet insert for parent %s and syncing only other targets', attachments[a]['parentId'])
+                        smartsheet_success = False
 
                     if mealie_upload_enabled:
                         mealie_success = upload_meals_to_mealie(meals, meal_type, attachment_name, attachments[a]['parentId'])
