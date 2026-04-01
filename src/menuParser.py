@@ -246,19 +246,20 @@ def extract_nutrition_raw_text(*texts):
 def extract_nutrition_fields(*texts):
     combined = ' '.join([str(text or '') for text in texts if text])
     combined = re.sub(r'\s+', ' ', combined)
+    combined = combined.replace(',', '')
 
     patterns = {
         'calories': (r'Calories?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)', 'kcal'),
-        'fatContent': (r'(?:Total\s+)?Fat\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
-        'saturatedFatContent': (r'Saturated\s+Fat\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
-        'transFatContent': (r'Trans\s+Fat\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
-        'unsaturatedFatContent': (r'Unsaturated\s+Fat\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
-        'cholesterolContent': (r'Cholesterol\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mg|g)?', 'mg'),
-        'sodiumContent': (r'Sodium\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mg|g)?', 'mg'),
-        'carbohydrateContent': (r'(?:Carbs?|Carbohydrates?)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
-        'fiberContent': (r'Fiber\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
-        'sugarContent': (r'Sugars?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
-        'proteinContent': (r'Protein\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
+        'fatContent': (r'(?:Total\s+)?Fat(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
+        'saturatedFatContent': (r'(?:Saturated|Sat\.?)\s*Fat(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
+        'transFatContent': (r'Trans\s+Fat(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
+        'unsaturatedFatContent': (r'Unsaturated\s+Fat(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
+        'cholesterolContent': (r'Cholesterol(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mg|g)?', 'mg'),
+        'sodiumContent': (r'Sodium(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mg|g)?', 'mg'),
+        'carbohydrateContent': (r'(?:Carbs?|Carbohydrates?|Carb)(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
+        'fiberContent': (r'Fiber(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
+        'sugarContent': (r'(?:Sugars?|T\.?\s*Sugs?)(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
+        'proteinContent': (r'Protein(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
     }
 
     nutrition = {}
@@ -548,6 +549,12 @@ def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
             'nutritionRaw': nutrition_raw,
         }
     }
+
+    if nutrition:
+        payload['settings'] = {
+            'showNutrition': True,
+        }
+
     return payload, menu_key
 
 
@@ -773,36 +780,81 @@ def getSteps(ingdir,height):
 
 
 def getNutrition(food,height):
-    nutrition_lines = []
-    seen = set()
-
+    section_lines = []
     for line in food:
         try:
-            line_height = int(line.get('height', 0))
+            line_height = float(line.get('height', 0))
+            line_width = float(line.get('width', 0))
         except (TypeError, ValueError):
             continue
 
-        if line_height not in range(int(height)-220,int(height)+220):
+        if line_height < float(height) - 260 or line_height > float(height) + 260:
             continue
 
         text = str(line.get('text', '') or '').strip()
         if not text:
             continue
 
-        if not re.search(r'Nutrition|Calories|Fat|Protein|Sodium|Carb|Sugar|Fiber|Cholesterol|\bmg\b|\bg\b', text, flags=re.IGNORECASE):
+        section_lines.append({
+            'height': line_height,
+            'width': line_width,
+            'text': text,
+        })
+
+    if not section_lines:
+        return ''
+
+    anchors = [line for line in section_lines if re.search(r'Nutritional\s+Information', line['text'], flags=re.IGNORECASE)]
+    if not anchors:
+        return ''
+
+    anchor = min(anchors, key=lambda item: abs(item['height'] - float(height)))
+    label_rows = []
+    value_rows = []
+
+    for line in section_lines:
+        if line['height'] > anchor['height'] + 20 or line['height'] < anchor['height'] - 170:
             continue
 
-        cleaned = re.sub('\n+', ' ', text).strip()
-        if cleaned in seen:
+        text = line['text']
+        if re.search(r'Nutritional\s+Information', text, flags=re.IGNORECASE):
             continue
-        seen.add(cleaned)
-        nutrition_lines.append(cleaned)
 
-    if nutrition_lines:
-        pdf_logger.info('Nutrition text candidates found near meal height %s: %s', height, len(nutrition_lines))
-        pdf_logger.debug('Nutrition candidate text: %s', '\n'.join(nutrition_lines))
+        parts = [part.strip() for part in text.split('\n') if part and part.strip()]
+        if not parts:
+            continue
 
-    return '\n'.join(nutrition_lines)
+        if line['width'] <= 110 and any(re.search(r'Servings|Calories|Protein|Carb|Fiber|Fat|Sodium|Sug', part, flags=re.IGNORECASE) for part in parts):
+            label_rows.extend(parts)
+            continue
+
+        numeric_parts = [part for part in parts if re.match(r'^[0-9]+(?:\.[0-9]+)?$', part)]
+        if len(numeric_parts) >= 4:
+            value_rows = numeric_parts
+
+    if not label_rows or not value_rows:
+        fallback_lines = []
+        for line in section_lines:
+            if line['height'] > anchor['height'] + 20 or line['height'] < anchor['height'] - 170:
+                continue
+            if line['width'] <= 200:
+                fallback_lines.append(re.sub('\n+', ' ', line['text']).strip())
+
+        if fallback_lines:
+            pdf_logger.info('Nutrition text candidates found near meal height %s: %s', height, len(fallback_lines))
+            pdf_logger.debug('Nutrition candidate text: %s', '\n'.join(fallback_lines))
+        return '\n'.join(fallback_lines)
+
+    paired_lines = []
+    for index, label in enumerate(label_rows):
+        if index >= len(value_rows):
+            break
+        paired_lines.append('%s %s'%(label, value_rows[index]))
+
+    nutrition_text = '\n'.join(paired_lines)
+    pdf_logger.info('Nutrition text candidates found near meal height %s: labels=%s values=%s', height, len(label_rows), len(value_rows))
+    pdf_logger.debug('Nutrition candidate text: %s', nutrition_text)
+    return nutrition_text
 
 '''
 Take the times and identify them.
