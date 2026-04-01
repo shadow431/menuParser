@@ -45,6 +45,7 @@ pdf_logger.addHandler(pdf_fh)
 
 mealie_ingredient_nlp_enabled = False
 mealie_category_cache = None
+mealie_tag_cache = None
 
 '''
 get the smartsheet data
@@ -164,6 +165,28 @@ def extract_recipe_categories(menu_type_text):
     return categories
 
 
+def extract_recipe_tags(*tag_values):
+    tags = []
+    seen_slugs = set()
+    for tag_value in tag_values:
+        value = str(tag_value or '').strip()
+        if not value:
+            continue
+        slug = category_slug(value)
+        if not slug or slug in seen_slugs:
+            continue
+        tags.append({'name': value, 'slug': slug})
+        seen_slugs.add(slug)
+    return tags
+
+
+def prefixed_tag_value(prefix, value):
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    return '%s:%s'%(prefix, text)
+
+
 def mealie_load_category_cache():
     global mealie_category_cache
     if mealie_category_cache is not None:
@@ -215,6 +238,72 @@ def mealie_resolve_recipe_categories(category_candidates):
         create_response = requests.post(create_url, data=json.dumps(create_payload), headers=mealie_headers, verify=sslVerify)
         if create_response.status_code >= 300:
             parser_logger.warning('Failed creating Mealie category %s (%s): %s', name, create_response.status_code, create_response.text)
+            continue
+
+        created = create_response.json() or {}
+        normalized = {
+            'id': created.get('id'),
+            'name': created.get('name', name),
+            'slug': created.get('slug', slug),
+        }
+        if normalized.get('id'):
+            cache[slug] = normalized
+            resolved.append(normalized)
+
+    return resolved
+
+
+def mealie_load_tag_cache():
+    global mealie_tag_cache
+    if mealie_tag_cache is not None:
+        return mealie_tag_cache
+
+    mealie_tag_cache = {}
+    url = mealie_build_url('/api/organizers/tags')
+    response = requests.get(url, headers=mealie_headers, verify=sslVerify)
+    if response.status_code >= 300:
+        parser_logger.warning('Failed loading Mealie tags (%s): %s', response.status_code, response.text)
+        return mealie_tag_cache
+
+    payload = response.json() or {}
+    for item in payload.get('items') or []:
+        slug = str(item.get('slug') or '').strip().lower()
+        if not slug:
+            continue
+        mealie_tag_cache[slug] = {
+            'id': item.get('id'),
+            'name': item.get('name'),
+            'slug': item.get('slug'),
+        }
+    return mealie_tag_cache
+
+
+def mealie_resolve_recipe_tags(tag_candidates):
+    if not tag_candidates:
+        return []
+
+    cache = mealie_load_tag_cache()
+    resolved = []
+
+    for tag in tag_candidates:
+        slug = str(tag.get('slug') or '').strip().lower()
+        name = str(tag.get('name') or '').strip()
+        if not slug or not name:
+            continue
+
+        existing = cache.get(slug)
+        if existing and existing.get('id'):
+            resolved.append(existing)
+            continue
+
+        create_url = mealie_build_url('/api/organizers/tags')
+        create_payload = {
+            'name': name,
+            'slug': slug,
+        }
+        create_response = requests.post(create_url, data=json.dumps(create_payload), headers=mealie_headers, verify=sslVerify)
+        if create_response.status_code >= 300:
+            parser_logger.warning('Failed creating Mealie tag %s (%s): %s', name, create_response.status_code, create_response.text)
             continue
 
         created = create_response.json() or {}
@@ -500,6 +589,15 @@ def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
     menu_key_source = '%s|%s|%s|%s|%s'%(plan_source, meal_type, meal.get('number', ''), main_dish, side_dish)
     menu_key = hashlib.sha1(menu_key_source.encode('utf-8')).hexdigest()
 
+    meal_number_value = str(meal.get('number', '')).strip()
+    menu_type_label_value = str(meal.get('type', '')).strip()
+
+    effective_meal_type = str(meal_type or '').strip()
+    if effective_meal_type.lower() == 'meal' and re.search(r'\b8\b', meal_number_value):
+        effective_meal_type = 'Drink'
+    if re.search(r'^\s*drink\s+idea\s*$', menu_type_label_value, flags=re.IGNORECASE):
+        effective_meal_type = 'Drink'
+
     ingredient_lines = normalize_ingredient_lines(meal.get('ingredients', ''))
 
     ingredients = []
@@ -525,7 +623,19 @@ def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
             'ingredientReferences': [],
         })
 
-    recipe_categories = mealie_resolve_recipe_categories(extract_recipe_categories(meal.get('type', '')))
+    category_candidates = extract_recipe_categories(meal.get('type', ''))
+    menu_type_slug = category_slug(effective_meal_type)
+    if menu_type_slug and menu_type_slug not in [str(each.get('slug') or '').strip().lower() for each in category_candidates]:
+        category_candidates.append({'name': str(effective_meal_type).strip(), 'slug': menu_type_slug})
+
+    recipe_categories = mealie_resolve_recipe_categories(category_candidates)
+    recipe_tags = mealie_resolve_recipe_tags(extract_recipe_tags(
+        'Emeals',
+        prefixed_tag_value('menuPlanSource', plan_source),
+        prefixed_tag_value('menuType', effective_meal_type),
+        prefixed_tag_value('mealNumber', meal_number_value),
+        prefixed_tag_value('menuTypeLabel', menu_type_label_value),
+    ))
     nutrition = extract_nutrition_fields(meal.get('nutritionText', ''), meal.get('ingredients', ''), meal.get('instructions', ''))
     nutrition_raw = extract_nutrition_raw_text(meal.get('nutritionText', ''), meal.get('ingredients', ''), meal.get('instructions', ''))
 
@@ -536,16 +646,17 @@ def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
         'cookTime': normalize_time_value(meal.get('cook', '')),
         'totalTime': normalize_time_value(meal.get('total', '')),
         'recipeCategory': recipe_categories,
+        'tags': recipe_tags,
         'recipeIngredient': ingredients,
         'recipeInstructions': instructions,
         'nutrition': nutrition if nutrition else None,
         'extras': {
             'menuParserKey': menu_key,
             'menuPlanSource': plan_source,
-            'menuType': meal_type,
-            'mealNumber': meal.get('number', ''),
+            'menuType': effective_meal_type,
+            'mealNumber': meal_number_value,
             'sourceSmartsheetRowId': str(source_row_id),
-            'menuTypeLabel': meal.get('type', ''),
+            'menuTypeLabel': menu_type_label_value,
             'nutritionRaw': nutrition_raw,
         }
     }
