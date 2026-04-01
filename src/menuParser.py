@@ -184,7 +184,7 @@ def prefixed_tag_value(prefix, value):
     text = str(value or '').strip()
     if not text:
         return ''
-    return '%s:%s'%(prefix, text)
+    return text
 
 
 def mealie_load_category_cache():
