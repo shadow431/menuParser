@@ -130,11 +130,66 @@ def normalize_time_value(raw_time):
     text = re.sub(r'\b(minutes?|mins?)\b', 'm', text)
     text = re.sub(r'\bhr\b', 'h', text)
     text = re.sub(r'\bmin\b', 'm', text)
-    text = re.sub(r'\s+', '', text)
 
-    if not re.search(r'\d', text):
+    hours_match = re.search(r'(\d+)\s*h', text)
+    minutes_match = re.search(r'(\d+)\s*m', text)
+    hours = hours_match.group(1) if hours_match else None
+    minutes = minutes_match.group(1) if minutes_match else None
+
+    if not hours and not minutes:
         return None
-    return text
+    if hours and minutes:
+        return f'{hours}h {minutes}m'
+    if hours:
+        return f'{hours}h'
+    return f'{minutes}m'
+
+
+def extract_time_values(raw_time_text):
+    text = str(raw_time_text or '')
+    text = re.sub(r'\b(hours?|hrs?)\b', 'h', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b(minutes?|mins?)\b', 'm', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bhr\b', 'h', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bmin\b', 'm', text, flags=re.IGNORECASE)
+
+    values = []
+    for match in re.finditer(r'(\d+\s*h(?:\s*\d+\s*m)?|\d+\s*m)', text, flags=re.IGNORECASE):
+        value = re.sub(r'\s+', '', match.group(1).lower())
+        if re.search(r'\d', value):
+            values.append(value)
+    return values
+
+
+def time_text_to_minutes(time_text):
+    normalized = normalize_time_value(time_text)
+    if not normalized:
+        return None
+
+    hours_match = re.search(r'(\d+)h', normalized)
+    minutes_match = re.search(r'(\d+)m', normalized)
+
+    hours = int(hours_match.group(1)) if hours_match else 0
+    minutes = int(minutes_match.group(1)) if minutes_match else 0
+    total_minutes = (hours * 60) + minutes
+    return total_minutes if total_minutes > 0 else None
+
+
+def minutes_to_time_value(total_minutes):
+    try:
+        total_minutes = int(total_minutes)
+    except (TypeError, ValueError):
+        return None
+
+    if total_minutes <= 0:
+        return None
+
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    if hours and minutes:
+        return f'{hours}h {minutes}m'
+    if hours:
+        return f'{hours}h'
+    return f'{minutes}m'
 
 
 def category_slug(name):
@@ -187,28 +242,39 @@ def prefixed_tag_value(prefix, value):
     return text
 
 
-def mealie_load_category_cache():
+def mealie_load_category_cache(force_refresh=False):
     global mealie_category_cache
-    if mealie_category_cache is not None:
+    if mealie_category_cache is not None and not force_refresh:
         return mealie_category_cache
 
     mealie_category_cache = {}
     url = mealie_build_url('/api/organizers/categories')
-    response = requests.get(url, headers=mealie_headers, verify=sslVerify)
-    if response.status_code >= 300:
-        parser_logger.warning('Failed loading Mealie categories (%s): %s', response.status_code, response.text)
-        return mealie_category_cache
+    page = 1
+    per_page = 100
+    while True:
+        response = requests.get(url, params={'page': page, 'perPage': per_page}, headers=mealie_headers, verify=sslVerify)
+        if response.status_code >= 300:
+            parser_logger.warning('Failed loading Mealie categories (%s): %s', response.status_code, response.text)
+            return mealie_category_cache
 
-    payload = response.json() or {}
-    for item in payload.get('items') or []:
-        slug = str(item.get('slug') or '').strip().lower()
-        if not slug:
-            continue
-        mealie_category_cache[slug] = {
-            'id': item.get('id'),
-            'name': item.get('name'),
-            'slug': item.get('slug'),
-        }
+        payload = response.json() or {}
+        items = payload.get('items') or []
+        if not items:
+            break
+
+        for item in items:
+            slug = str(item.get('slug') or '').strip().lower()
+            if not slug:
+                continue
+            mealie_category_cache[slug] = {
+                'id': item.get('id'),
+                'name': item.get('name'),
+                'slug': item.get('slug'),
+            }
+
+        if len(items) < per_page:
+            break
+        page += 1
     return mealie_category_cache
 
 
@@ -237,6 +303,10 @@ def mealie_resolve_recipe_categories(category_candidates):
         }
         create_response = requests.post(create_url, data=json.dumps(create_payload), headers=mealie_headers, verify=sslVerify)
         if create_response.status_code >= 300:
+            refreshed = mealie_load_category_cache(force_refresh=True).get(slug)
+            if refreshed and refreshed.get('id'):
+                resolved.append(refreshed)
+                continue
             parser_logger.warning('Failed creating Mealie category %s (%s): %s', name, create_response.status_code, create_response.text)
             continue
 
@@ -253,28 +323,39 @@ def mealie_resolve_recipe_categories(category_candidates):
     return resolved
 
 
-def mealie_load_tag_cache():
+def mealie_load_tag_cache(force_refresh=False):
     global mealie_tag_cache
-    if mealie_tag_cache is not None:
+    if mealie_tag_cache is not None and not force_refresh:
         return mealie_tag_cache
 
     mealie_tag_cache = {}
     url = mealie_build_url('/api/organizers/tags')
-    response = requests.get(url, headers=mealie_headers, verify=sslVerify)
-    if response.status_code >= 300:
-        parser_logger.warning('Failed loading Mealie tags (%s): %s', response.status_code, response.text)
-        return mealie_tag_cache
+    page = 1
+    per_page = 100
+    while True:
+        response = requests.get(url, params={'page': page, 'perPage': per_page}, headers=mealie_headers, verify=sslVerify)
+        if response.status_code >= 300:
+            parser_logger.warning('Failed loading Mealie tags (%s): %s', response.status_code, response.text)
+            return mealie_tag_cache
 
-    payload = response.json() or {}
-    for item in payload.get('items') or []:
-        slug = str(item.get('slug') or '').strip().lower()
-        if not slug:
-            continue
-        mealie_tag_cache[slug] = {
-            'id': item.get('id'),
-            'name': item.get('name'),
-            'slug': item.get('slug'),
-        }
+        payload = response.json() or {}
+        items = payload.get('items') or []
+        if not items:
+            break
+
+        for item in items:
+            slug = str(item.get('slug') or '').strip().lower()
+            if not slug:
+                continue
+            mealie_tag_cache[slug] = {
+                'id': item.get('id'),
+                'name': item.get('name'),
+                'slug': item.get('slug'),
+            }
+
+        if len(items) < per_page:
+            break
+        page += 1
     return mealie_tag_cache
 
 
@@ -303,6 +384,10 @@ def mealie_resolve_recipe_tags(tag_candidates):
         }
         create_response = requests.post(create_url, data=json.dumps(create_payload), headers=mealie_headers, verify=sslVerify)
         if create_response.status_code >= 300:
+            refreshed = mealie_load_tag_cache(force_refresh=True).get(slug)
+            if refreshed and refreshed.get('id'):
+                resolved.append(refreshed)
+                continue
             parser_logger.warning('Failed creating Mealie tag %s (%s): %s', name, create_response.status_code, create_response.text)
             continue
 
@@ -333,6 +418,7 @@ def extract_nutrition_raw_text(*texts):
 
 
 def extract_nutrition_fields(*texts):
+    primary_text = str(texts[0] or '') if texts else ''
     combined = ' '.join([str(text or '') for text in texts if text])
     combined = re.sub(r'\s+', ' ', combined)
     combined = combined.replace(',', '')
@@ -347,7 +433,6 @@ def extract_nutrition_fields(*texts):
         'sodiumContent': (r'Sodium(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mg|g)?', 'mg'),
         'carbohydrateContent': (r'(?:Carbs?|Carbohydrates?|Carb)(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
         'fiberContent': (r'Fiber(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
-        'sugarContent': (r'(?:Sugars?|T\.?\s*Sugs?)(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
         'proteinContent': (r'Protein(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', 'g'),
     }
 
@@ -362,7 +447,66 @@ def extract_nutrition_fields(*texts):
             unit = (match.group(2) or default_unit).lower()
         nutrition[field] = f'{value}{unit}'
 
+    total_sugar_match = re.search(r'(?:Sugars?|T\.?\s*Sugs?)(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', combined, flags=re.IGNORECASE)
+    added_sugar_match = re.search(r'(?:Added\s+Sugars?|A\.?\s*Sugs?)(?:\s*\([^)]*\))?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg)?', combined, flags=re.IGNORECASE)
+
+    selected_sugar_match = total_sugar_match or added_sugar_match
+    if selected_sugar_match:
+        sugar_value = selected_sugar_match.group(1)
+        sugar_unit = str(selected_sugar_match.group(2) or 'g').lower()
+        nutrition['sugarContent'] = f'{sugar_value}{sugar_unit}'
+
+    if primary_text and re.search(r'Nutritional\s+Information', primary_text, flags=re.IGNORECASE):
+        numeric_lines = re.findall(r'(?m)^\s*([0-9]+(?:\.[0-9]+)?)\s*$', primary_text)
+        servings_value = extract_servings_value(primary_text)
+
+        if servings_value is not None and numeric_lines:
+            try:
+                if float(numeric_lines[0]) == float(servings_value):
+                    numeric_lines = numeric_lines[1:]
+            except ValueError:
+                pass
+
+        fallback_fields = [
+            ('carbohydrateContent', 'g'),
+            ('fiberContent', 'g'),
+            ('fatContent', 'g'),
+            ('sugarContent', 'g'),
+        ]
+        value_index = 0
+        for field, unit in fallback_fields:
+            if field in nutrition:
+                continue
+            if value_index >= len(numeric_lines):
+                break
+            nutrition[field] = f"{numeric_lines[value_index]}{unit}"
+            value_index += 1
+
     return nutrition
+
+
+def extract_servings_value(*texts):
+    combined = '\n'.join([str(text or '') for text in texts if text])
+    if not combined.strip():
+        return None
+
+    normalized = re.sub(r'\s+', ' ', combined)
+    patterns = [
+        r'Servings?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)',
+        r'Main\s+([0-9]+(?:\.[0-9]+)?)',
+        r'Serving\s*s?\s*([0-9]+(?:\.[0-9]+)?)',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            return float(match.group(1))
+        except (TypeError, ValueError):
+            continue
+
+    return None
 
 
 def build_raw_ingredient(line):
@@ -629,22 +773,37 @@ def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
         category_candidates.append({'name': str(effective_meal_type).strip(), 'slug': menu_type_slug})
 
     recipe_categories = mealie_resolve_recipe_categories(category_candidates)
+    dish_role_value = str(meal.get('dishRole', '') or '').strip()
+    side_dish_tag_value = 'Side Dish' if dish_role_value.lower() == 'side dish' else ''
     recipe_tags = mealie_resolve_recipe_tags(extract_recipe_tags(
         'Emeals',
         prefixed_tag_value('menuPlanSource', plan_source),
         prefixed_tag_value('menuType', effective_meal_type),
         prefixed_tag_value('mealNumber', meal_number_value),
         prefixed_tag_value('menuTypeLabel', menu_type_label_value),
+        side_dish_tag_value,
     ))
     nutrition = extract_nutrition_fields(meal.get('nutritionText', ''), meal.get('ingredients', ''), meal.get('instructions', ''))
+    servings_value = extract_servings_value(meal.get('nutritionText', ''))
     nutrition_raw = extract_nutrition_raw_text(meal.get('nutritionText', ''), meal.get('ingredients', ''), meal.get('instructions', ''))
+
+    prep_time = normalize_time_value(meal.get('prep', ''))
+    cook_time = normalize_time_value(meal.get('cook', ''))
+    total_time = normalize_time_value(meal.get('total', ''))
+
+    if not total_time and prep_time and cook_time:
+        prep_minutes = time_text_to_minutes(prep_time)
+        cook_minutes = time_text_to_minutes(cook_time)
+        if prep_minutes is not None and cook_minutes is not None:
+            total_time = minutes_to_time_value(prep_minutes + cook_minutes)
 
     payload = {
         'name': recipe_name,
         'description': 'Imported from eMeals plan: %s'%(plan_source),
-        'prepTime': normalize_time_value(meal.get('prep', '')),
-        'cookTime': normalize_time_value(meal.get('cook', '')),
-        'totalTime': normalize_time_value(meal.get('total', '')),
+        'prepTime': prep_time,
+        'cookTime': cook_time,
+        'performTime': cook_time,
+        'totalTime': total_time,
         'recipeCategory': recipe_categories,
         'tags': recipe_tags,
         'recipeIngredient': ingredients,
@@ -657,9 +816,13 @@ def build_mealie_recipe_payload(meal, meal_type, plan_source, source_row_id):
             'mealNumber': meal_number_value,
             'sourceSmartsheetRowId': str(source_row_id),
             'menuTypeLabel': menu_type_label_value,
+            'dishRole': dish_role_value,
             'nutritionRaw': nutrition_raw,
         }
     }
+
+    if servings_value and servings_value > 0:
+        payload['recipeServings'] = servings_value
 
     if nutrition:
         payload['settings'] = {
@@ -690,11 +853,11 @@ def upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id):
                 retry_response = requests.patch(patch_url, data=json.dumps(retry_payload), headers=mealie_headers, verify=sslVerify)
                 if retry_response.status_code < 300:
                     parser_logger.info('Updated Mealie recipe (name preserved due duplicate): %s', payload['name'])
-                    return True
+                    return True, existing_slug
             parser_logger.error('Failed updating Mealie recipe (%s): %s', response.status_code, response.text)
-            return False
+            return False, None
         parser_logger.info('Updated Mealie recipe: %s', payload['name'])
-        return True
+        return True, existing_slug
 
     create_url = mealie_build_url('/api/recipes')
     create_response = requests.post(create_url, data=json.dumps({'name': payload['name']}), headers=mealie_headers, verify=sslVerify)
@@ -713,16 +876,16 @@ def upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id):
                 update_response = requests.patch(patch_url, data=json.dumps(payload), headers=mealie_headers, verify=sslVerify)
                 if update_response.status_code < 300:
                     parser_logger.info('Updated existing Mealie recipe after duplicate create: %s', payload['name'])
-                    return True
+                    return True, fallback_slug
 
         parser_logger.error('Failed creating Mealie recipe shell (%s): %s', create_response.status_code, create_response.text)
-        return False
+        return False, None
 
     create_body = create_response.json()
     created_slug = create_body if isinstance(create_body, str) else create_body.get('slug')
     if not created_slug:
         parser_logger.error('Unable to determine created Mealie slug for: %s', payload['name'])
-        return False
+        return False, None
 
     patch_url = mealie_build_url('/api/recipes/%s'%(created_slug))
     patch_payload = dict(payload)
@@ -735,7 +898,7 @@ def upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id):
             retry_response = requests.patch(patch_url, data=json.dumps(retry_payload), headers=mealie_headers, verify=sslVerify)
             if retry_response.status_code < 300:
                 parser_logger.info('Created Mealie recipe shell and updated fields (name preserved due duplicate): %s', payload['name'])
-                return True
+                return True, created_slug
 
             existing_slug = mealie_find_slug_by_exact_name(payload.get('name', ''))
             if existing_slug:
@@ -745,20 +908,105 @@ def upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id):
                 fallback_response = requests.patch(fallback_patch_url, data=json.dumps(fallback_payload), headers=mealie_headers, verify=sslVerify)
                 if fallback_response.status_code < 300:
                     parser_logger.info('Updated existing Mealie recipe after create-shell duplicate: %s', payload['name'])
-                    return True
+                    return True, existing_slug
         parser_logger.error('Failed updating created Mealie recipe (%s): %s', update_response.status_code, update_response.text)
-        return False
+        return False, None
 
     parser_logger.info('Created Mealie recipe: %s', payload['name'])
+    return True, created_slug
+
+
+def mealie_attach_pdf_asset(recipe_slug, pdf_path, asset_name):
+    if not recipe_slug:
+        return False
+    if not pdf_path or not os.path.exists(pdf_path):
+        parser_logger.info('Skipping Mealie recipe asset attach for %s; source PDF not available at %s', recipe_slug, pdf_path)
+        return True
+
+    recipe = mealie_get_recipe(recipe_slug)
+    if not recipe:
+        return False
+
+    asset_basename = os.path.basename(str(asset_name or 'plan.pdf'))
+    existing_assets = recipe.get('assets') or []
+    for asset in existing_assets:
+        if str(asset.get('name') or '').strip() == asset_basename:
+            parser_logger.info('Mealie recipe asset already present for %s: %s', recipe_slug, asset_basename)
+            return True
+
+    upload_url = mealie_build_url('/api/recipes/%s/assets'%(recipe_slug))
+    upload_headers = {
+        'Authorization': mealie_headers.get('Authorization', ''),
+    }
+
+    with open(pdf_path, 'rb') as pdf_handle:
+        files = {
+            'file': (asset_basename, pdf_handle, 'application/pdf'),
+        }
+        data = {
+            'name': asset_basename,
+            'icon': 'mdi-file-pdf-box',
+            'extension': 'pdf',
+        }
+        response = requests.post(upload_url, headers=upload_headers, data=data, files=files, verify=sslVerify)
+
+    if response.status_code >= 300:
+        parser_logger.warning('Failed attaching Mealie recipe asset %s to %s (%s): %s', asset_basename, recipe_slug, response.status_code, response.text)
+        return False
+
+    parser_logger.info('Attached Mealie recipe asset %s to %s', asset_basename, recipe_slug)
     return True
 
 
-def upload_meals_to_mealie(meals, meal_type, plan_source, source_row_id):
-    all_success = True
+def expand_meal_recipe_entries(meals, meal_type):
+    entries = []
+    is_meal_plan = str(meal_type or '').strip().lower() == 'meal'
+
     for meal in meals:
-        result = upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id)
+        if not is_meal_plan:
+            entries.append(meal)
+            continue
+
+        main_entry = dict(meal)
+        main_entry['dishRole'] = 'Main Dish'
+        main_entry['sideDish'] = ''
+        main_entry['ingredients'] = meal.get('ingredientsMain', meal.get('ingredients', ''))
+        main_entry['instructions'] = meal.get('instructionsMain', meal.get('instructions', ''))
+        main_entry['nutritionText'] = meal.get('nutritionTextMain', meal.get('nutritionText', ''))
+        entries.append(main_entry)
+
+        side_name = str(meal.get('sideDish') or '').strip()
+        if not side_name:
+            continue
+
+        side_entry = dict(meal)
+        side_entry['dishRole'] = 'Side Dish'
+        side_entry['mainDish'] = side_name
+        side_entry['sideDish'] = ''
+        side_entry['ingredients'] = meal.get('ingredientsSide', '')
+        side_entry['instructions'] = meal.get('instructionsSide', '')
+        side_entry['nutritionText'] = meal.get('nutritionTextSide', '')
+        entries.append(side_entry)
+
+    return entries
+
+
+def upload_meals_to_mealie(meals, meal_type, plan_source, source_row_id, pdf_path=None, pdf_asset_name=None):
+    all_success = True
+    first_recipe_slug = None
+    for meal in expand_meal_recipe_entries(meals, meal_type):
+        result, saved_slug = upsert_mealie_recipe(meal, meal_type, plan_source, source_row_id)
         if not result:
             all_success = False
+            continue
+        if not first_recipe_slug and saved_slug:
+            first_recipe_slug = saved_slug
+
+    if first_recipe_slug and pdf_path and pdf_asset_name:
+        asset_result = mealie_attach_pdf_asset(first_recipe_slug, pdf_path, pdf_asset_name)
+        if not asset_result:
+            all_success = False
+
     return all_success
 
 
@@ -793,7 +1041,7 @@ def getColumns(sheet):
 '''
 Pull out and assemble the names of the dishes as well as the meal Type, if there is a type)
 '''
-def getDishes(food,height):
+def getDishes(food,height,meal_number=''):
     pdf_logger.info('Getting the dishes')
     pdf_logger.debug(height)
 
@@ -807,6 +1055,8 @@ def getDishes(food,height):
             menuLine.append(line)
         elif int(line['height']) in range(int(height),int(height)+3) and line['width'] < 193.0:
             menuType = line['text']
+
+    menuLine = sorted(menuLine, key=lambda item: (-float(item.get('height', 0)), float(item.get('width', 0))))
 
     '''
     for each line, if it is the first one, assume it is the start of the main dish name
@@ -828,6 +1078,26 @@ def getDishes(food,height):
                     sideDish = sideDish + each['text']
             elif diff > 20:
                 sideDish = each['text']
+
+    if re.search(r'^\s*Recipe\b', str(meal_number or ''), flags=re.IGNORECASE):
+        title_candidates = []
+        for each in menuLine:
+            candidate_text = re.sub(r'\s+', ' ', str(each.get('text', '') or '')).strip()
+            if not candidate_text:
+                continue
+            if re.search(r'Nutritional\s+Information|^Ingredients:?$|^Instructions:?$', candidate_text, flags=re.IGNORECASE):
+                continue
+            if re.search(r'(?i)\b(stir|serve|serving|combine|preheat|bake|whisk|minutes?|immediately)\b', candidate_text):
+                continue
+            if re.search(r'(?i)^(and|with|just)\b', candidate_text):
+                continue
+            if len(candidate_text) < 4:
+                continue
+            title_candidates.append(candidate_text)
+
+        if title_candidates:
+            mainDish = title_candidates[0]
+        sideDish = ''
 
 
     '''if main dish isnt set set it to be empyt to prevent futre error (Not a very common issue and can be resolved by hand.  later TODO'''
@@ -890,7 +1160,27 @@ def getSteps(ingdir,height):
     return ingredients,instructions
 
 
-def getNutrition(food,height):
+def split_dual_section_text(raw_text):
+    text = str(raw_text or '').strip()
+    if not text:
+        return '', ''
+
+    parts = re.split(r'\n[-—_]{5,}\n', text, maxsplit=1)
+    if len(parts) == 1:
+        return text, ''
+    return parts[0].strip(), parts[1].strip()
+
+
+def pair_nutrition_rows(label_rows, value_rows):
+    paired_lines = []
+    for index, label in enumerate(label_rows):
+        if index >= len(value_rows):
+            break
+        paired_lines.append('%s %s'%(label, value_rows[index]))
+    return '\n'.join(paired_lines)
+
+
+def getNutritionParts(food,height):
     section_lines = []
     for line in food:
         try:
@@ -913,15 +1203,15 @@ def getNutrition(food,height):
         })
 
     if not section_lines:
-        return ''
+        return {'main': '', 'side': ''}
 
     anchors = [line for line in section_lines if re.search(r'Nutritional\s+Information', line['text'], flags=re.IGNORECASE)]
     if not anchors:
-        return ''
+        return {'main': '', 'side': ''}
 
     anchor = min(anchors, key=lambda item: abs(item['height'] - float(height)))
     label_rows = []
-    value_rows = []
+    value_candidates = []
 
     for line in section_lines:
         if line['height'] > anchor['height'] + 20 or line['height'] < anchor['height'] - 170:
@@ -941,9 +1231,15 @@ def getNutrition(food,height):
 
         numeric_parts = [part for part in parts if re.match(r'^[0-9]+(?:\.[0-9]+)?$', part)]
         if len(numeric_parts) >= 4:
-            value_rows = numeric_parts
+            value_candidates.append({
+                'height': line['height'],
+                'width': line['width'],
+                'numeric': numeric_parts,
+                'has_main_marker': bool(re.search(r'(^|\n)Main\b', text, flags=re.IGNORECASE)),
+                'has_side_marker': bool(re.search(r'(^|\n)Side\b', text, flags=re.IGNORECASE)),
+            })
 
-    if not label_rows or not value_rows:
+    if not label_rows or not value_candidates:
         fallback_lines = []
         for line in section_lines:
             if line['height'] > anchor['height'] + 20 or line['height'] < anchor['height'] - 170:
@@ -951,21 +1247,47 @@ def getNutrition(food,height):
             if line['width'] <= 200:
                 fallback_lines.append(re.sub('\n+', ' ', line['text']).strip())
 
-        if fallback_lines:
+        fallback_text = '\n'.join(fallback_lines)
+        if fallback_text:
             pdf_logger.info('Nutrition text candidates found near meal height %s: %s', height, len(fallback_lines))
-            pdf_logger.debug('Nutrition candidate text: %s', '\n'.join(fallback_lines))
-        return '\n'.join(fallback_lines)
+            pdf_logger.debug('Nutrition fallback text: %s', fallback_text)
+        return {'main': fallback_text, 'side': ''}
 
-    paired_lines = []
-    for index, label in enumerate(label_rows):
-        if index >= len(value_rows):
-            break
-        paired_lines.append('%s %s'%(label, value_rows[index]))
+    sorted_candidates = sorted(value_candidates, key=lambda candidate: (abs(candidate['height'] - anchor['height']), candidate['width']))
+    main_candidate = None
+    side_candidate = None
 
-    nutrition_text = '\n'.join(paired_lines)
-    pdf_logger.info('Nutrition text candidates found near meal height %s: labels=%s values=%s', height, len(label_rows), len(value_rows))
-    pdf_logger.debug('Nutrition candidate text: %s', nutrition_text)
-    return nutrition_text
+    main_marked = [candidate for candidate in sorted_candidates if candidate['has_main_marker']]
+    side_marked = [candidate for candidate in sorted_candidates if candidate['has_side_marker']]
+
+    if main_marked:
+        main_candidate = min(main_marked, key=lambda candidate: (abs(candidate['height'] - anchor['height']), candidate['width']))
+    else:
+        main_candidate = sorted(sorted_candidates, key=lambda candidate: (abs(candidate['height'] - anchor['height']), candidate['width']))[0]
+
+    if side_marked:
+        side_candidate = min(side_marked, key=lambda candidate: (abs(candidate['height'] - anchor['height']), abs(candidate['width'] - (main_candidate['width'] + 35))))
+    else:
+        right_side = [candidate for candidate in sorted_candidates if candidate['width'] > main_candidate['width'] + 15]
+        if right_side:
+            side_candidate = sorted(right_side, key=lambda candidate: (abs(candidate['height'] - anchor['height']), candidate['width']))[0]
+
+    main_text = pair_nutrition_rows(label_rows, main_candidate['numeric']) if main_candidate else ''
+    side_text = pair_nutrition_rows(label_rows, side_candidate['numeric']) if side_candidate else ''
+
+    pdf_logger.info('Nutrition text candidates found near meal height %s: labels=%s values=%s', height, len(label_rows), len(value_candidates))
+    pdf_logger.debug('Nutrition main text: %s', main_text)
+    if side_text:
+        pdf_logger.debug('Nutrition side text: %s', side_text)
+
+    return {
+        'main': main_text,
+        'side': side_text,
+    }
+
+
+def getNutrition(food,height):
+    return getNutritionParts(food,height).get('main', '')
 
 '''
 Take the times and identify them.
@@ -1007,8 +1329,29 @@ def getTimes(prep,cook,total,height):
             pdf_logger.info('thisCook has both cook and total, splitting itmes')
             thisCook,thisTotal=splitTimes(thisCook)
 
-    '''Return the times in a normalized textual form'''
-    return extract_time_line(thisPrep),extract_time_line(thisCook),extract_time_line(thisTotal)
+    prep_value = extract_time_line(thisPrep)
+    cook_value = extract_time_line(thisCook)
+    total_value = extract_time_line(thisTotal)
+
+    cook_values = extract_time_values(thisCook)
+    total_values = extract_time_values(thisTotal)
+
+    if len(cook_values) >= 2 and not total_value:
+        cook_value = cook_values[0]
+        total_value = cook_values[1]
+    elif cook_values and not cook_value:
+        cook_value = cook_values[0]
+
+    if total_values and not total_value:
+        total_value = total_values[0]
+
+    if not total_value and prep_value and cook_value:
+        prep_minutes = time_text_to_minutes(prep_value)
+        cook_minutes = time_text_to_minutes(cook_value)
+        if prep_minutes is not None and cook_minutes is not None:
+            total_value = minutes_to_time_value(prep_minutes + cook_minutes)
+
+    return prep_value, cook_value, total_value
 
 def splitTimes(thisCook):
         pieces = thisCook.split('\n')
@@ -1034,12 +1377,20 @@ def mealAssembly(data):
         meal ={}
         meal['number'] = mealNum['text'].strip()
         pdf_logger.debug('Meal number: %s'%(mealNum))
-        meal['mainDish'],meal['sideDish'],meal['type'] = getDishes(data['food'],mealNum['height'])
+        meal['mainDish'],meal['sideDish'],meal['type'] = getDishes(data['food'],mealNum['height'],meal['number'])
         meal['prep'],meal['cook'],meal['total'] = getTimes(data['prep'],data['cook'],data['total'],mealNum['height'])
         meal['ingredients'],meal['instructions'] = getSteps(data['food'],mealNum['height'])
-        meal['nutritionText'] = getNutrition(data['food'],mealNum['height'])
-        if meal['nutritionText']:
-            pdf_logger.info('Nutrition text for meal %s (%s): %s', meal['number'], meal['mainDish'], meal['nutritionText'])
+        meal['ingredientsMain'],meal['ingredientsSide'] = split_dual_section_text(meal.get('ingredients', ''))
+        meal['instructionsMain'],meal['instructionsSide'] = split_dual_section_text(meal.get('instructions', ''))
+
+        nutrition_parts = getNutritionParts(data['food'],mealNum['height'])
+        meal['nutritionTextMain'] = nutrition_parts.get('main', '')
+        meal['nutritionTextSide'] = nutrition_parts.get('side', '')
+        meal['nutritionText'] = meal['nutritionTextMain']
+        if meal['nutritionTextMain']:
+            pdf_logger.info('Nutrition text for meal %s (%s): %s', meal['number'], meal['mainDish'], meal['nutritionTextMain'])
+        if meal['nutritionTextSide']:
+            pdf_logger.info('Nutrition side text for meal %s (%s): %s', meal['number'], meal['sideDish'], meal['nutritionTextSide'])
         meals.append(meal)
     if debug == 'pdf':
         print(meals)
@@ -1096,6 +1447,12 @@ def getMeals(pdf,meal_type):
                  objDict['width'] = objType.x0
                  objDict['text'] = objType.get_text()
                  pageList.append(objDict)
+
+        if str(meal_type or '').strip().lower() == 'recipe':
+            staples_marker = any(re.search(r'No\s+staples\s+for\s+this\s+meal', str(item.get('text', '')), flags=re.IGNORECASE) for item in pageList)
+            if staples_marker:
+                pdf_logger.info('Detected staples page marker; stopping recipe parsing before staples section')
+                break
 
         '''
         take a best guess at the contect of each text block
@@ -1176,6 +1533,7 @@ if __name__ == '__main__':
     mealie_url = normalize_mealie_url(os.getenv("mealie_url"))
     mealie_api_token = os.getenv("mealie_api_token")
     meal_type = os.getenv("meal_type")
+    meal_heading = os.getenv("meal_heading") or meal_type
 
     sslVerify = os.getenv("sslVerify")
 
@@ -1311,7 +1669,7 @@ if __name__ == '__main__':
                         localfile.close()
                     '''process the PDF and get the meals back'''
                     try:
-                        meals = getMeals('tmp.pdf',meal_type)
+                        meals = getMeals('tmp.pdf',meal_heading)
                     except:
                         parser_logger.critical(("Failed: "+ str(row)))
                         parser_logger.critical((traceback.print_exc()))
@@ -1343,7 +1701,7 @@ if __name__ == '__main__':
                         smartsheet_success = False
 
                     if mealie_upload_enabled:
-                        mealie_success = upload_meals_to_mealie(meals, meal_type, attachment_name, attachments[a]['parentId'])
+                        mealie_success = upload_meals_to_mealie(meals, meal_type, attachment_name, attachments[a]['parentId'], 'tmp.pdf', attachment_name)
 
                     any_upload_target = smartsheet_upload_enabled or mealie_upload_enabled
                     if any_upload_target and smartsheet_success and mealie_success:
