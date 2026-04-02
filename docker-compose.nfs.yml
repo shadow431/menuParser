@@ -12,11 +12,11 @@ volumes:
     driver: local
     driver_opts:
       type: nfs
-      o: addr=${NFS_SERVER},nfsvers=${NFS_VERSION:-4},rw
+      o: addr=${NFS_SERVER},nfsvers=${NFS_VERSION:-4},rw,soft
       device: :${NFS_MEALIE_DATA_PATH}
   mealie-pgdata:
     driver: local
     driver_opts:
       type: nfs
-      o: addr=${NFS_SERVER},nfsvers=${NFS_VERSION:-4},rw
+      o: addr=${NFS_SERVER},nfsvers=${NFS_VERSION:-4},rw,hard
       device: :${NFS_MEALIE_PGDATA_PATH}
