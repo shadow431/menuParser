@@ -39,6 +39,13 @@ services:
       POSTGRES_SERVER: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: "${POSTGRES_DB:-mealie}"
+      SMTP_HOST: "${SMTP_HOST}"
+      SMTP_PORT: "${SMTP_PORT}"
+      SMTP_FROM_NAME: "${SMTP_FROM_NAME:-mealie}"
+      SMTP_AUTH_STRATEGY: "${SMTP_AUTH_STRATEGY:-TLS}"
+      SMTP_FROM_EMAIL: "${SMTP_FROM_EMAIL:-mealie@example.com}"
+      SMTP_USER: "${SMTP_USER}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD}"
     volumes:
       - mealie-data:/app/data/
 
@@ -46,7 +53,10 @@ services:
     image: postgres:17
     container_name: mealie-postgres
     restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}" # Replace with your desired UID:GID
     environment:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
       POSTGRES_USER: "${POSTGRES_USER:-mealie}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-change-me}"
       POSTGRES_DB: "${POSTGRES_DB:-mealie}"
